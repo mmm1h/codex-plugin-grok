@@ -44,10 +44,25 @@ import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from 
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
 
-const SERVICE_NAME =
-  process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME
-    ? "grok_codex_plugin"
-    : "claude_code_codex_plugin";
+function detectServiceName() {
+  if (process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME || process.env.GROK_SESSION_ID) {
+    return "grok_codex_plugin";
+  }
+  if (process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR) {
+    return "claude_code_codex_plugin";
+  }
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    if (home && fs.existsSync(path.join(home, ".grok"))) {
+      return "grok_codex_plugin";
+    }
+  } catch {
+    // ignore
+  }
+  return "claude_code_codex_plugin";
+}
+
+const SERVICE_NAME = detectServiceName();
 const TASK_THREAD_PREFIX = "Codex Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
   "Continue from the current thread state. Pick the next highest-value step and follow through until the task is resolved.";

@@ -8,14 +8,58 @@ import path from "node:path";
  * CLAUDE_PLUGIN_* aliases. Prefer Grok names, fall back to Claude names.
  */
 
-export function firstDefinedEnv(...names) {
+/** Shell-style dual-host plugin root used in hooks.json command strings. */
+export const DUAL_HOST_PLUGIN_ROOT_EXPR = "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}";
+
+/**
+ * Expand a dual-host plugin-root expression the same way Grok/Claude hook
+ * runners do for `${VAR}` / `${VAR:-default}` forms. Used by tests and by
+ * helpers that need to resolve hook command templates without a shell.
+ */
+export function expandPluginRootExpression(expression, env = process.env) {
+  const source = String(expression ?? "");
+  return source.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, braced, fallback, bare) => {
+    const name = braced || bare;
+    const value = env[name];
+    if (value != null && String(value).trim() !== "") {
+      return String(value);
+    }
+    if (braced && fallback != null) {
+      // Fallback may itself be $OTHER or ${OTHER}
+      if (fallback.startsWith("${") || fallback.startsWith("$")) {
+        return expandPluginRootExpression(fallback, env);
+      }
+      return fallback;
+    }
+    return "";
+  });
+}
+
+/**
+ * Resolve the absolute path to a plugin script for hook invocation.
+ * Prefers GROK_PLUGIN_ROOT, then CLAUDE_PLUGIN_ROOT.
+ */
+export function resolvePluginScriptPath(relativeScriptPath, env = process.env) {
+  const root = firstDefinedEnvFrom(env, "GROK_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT");
+  if (!root) {
+    return null;
+  }
+  const rel = String(relativeScriptPath ?? "").replace(/^[/\\]+/, "");
+  return path.join(root, rel);
+}
+
+function firstDefinedEnvFrom(env, ...names) {
   for (const name of names) {
-    const value = process.env[name];
+    const value = env[name];
     if (value != null && String(value).trim() !== "") {
       return String(value);
     }
   }
   return null;
+}
+
+export function firstDefinedEnv(...names) {
+  return firstDefinedEnvFrom(process.env, ...names);
 }
 
 export function resolvePluginRoot() {

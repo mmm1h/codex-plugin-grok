@@ -148,7 +148,19 @@ test("hooks keep session-end cleanup and stop gating enabled", () => {
   assert.match(source, /SessionEnd/);
   assert.match(source, /stop-review-gate-hook\.mjs/);
   assert.match(source, /session-lifecycle-hook\.mjs/);
+  // Dual-host: prefer Grok root, fall back to Claude (not Claude-only).
+  assert.match(source, /GROK_PLUGIN_ROOT/);
   assert.match(source, /CLAUDE_PLUGIN_ROOT/);
+  assert.match(source, /\$\{GROK_PLUGIN_ROOT:-\$CLAUDE_PLUGIN_ROOT\}/);
+  assert.doesNotMatch(source, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\//);
+});
+
+test("shipped docs avoid machine-local absolute user paths", () => {
+  const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
+  const agent = read("agents/codex-rescue.md");
+  assert.doesNotMatch(readme, /C:\/Users\/PC/i);
+  assert.doesNotMatch(agent, /C:\/Users\/PC/i);
+  assert.match(readme, /\/path\/to\/codex-plugin-grok|path\/to\/codex-plugin-grok/);
 });
 
 test("setup command can offer Codex install and still points users to codex login", () => {

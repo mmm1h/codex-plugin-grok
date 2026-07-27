@@ -49,7 +49,30 @@ test("terminateProcessTree treats missing Windows processes as already stopped",
   });
 
   assert.equal(outcome.attempted, true);
+  assert.equal(outcome.delivered, false);
   assert.equal(outcome.method, "taskkill");
   assert.equal(outcome.result.status, 128);
   assert.match(outcome.result.stdout, /not found/i);
+});
+
+test("terminateProcessTree treats partial Windows taskkill failures as best-effort stop", () => {
+  const outcome = terminateProcessTree(1234, {
+    platform: "win32",
+    runCommandImpl(command, args) {
+      return {
+        command,
+        args,
+        status: 128,
+        signal: null,
+        stdout: "",
+        stderr: "错误: 无法终止 PID 1234 的进程。\n原因: 此操作不支持。",
+        error: null
+      };
+    }
+  });
+
+  assert.equal(outcome.attempted, true);
+  assert.equal(outcome.delivered, false);
+  assert.equal(outcome.method, "taskkill");
+  assert.equal(outcome.result.status, 128);
 });

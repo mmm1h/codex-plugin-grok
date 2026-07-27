@@ -13,7 +13,10 @@ export function createBrokerEndpoint(sessionDir, platform = process.platform) {
     return `pipe:\\\\.\\pipe\\${pipeName}`;
   }
 
-  return `unix:${path.join(sessionDir, "broker.sock")}`;
+  // Always use POSIX separators in the unix: endpoint string, even when this
+  // helper is unit-tested on Windows with a non-win32 platform override.
+  const socketPath = path.posix.join(String(sessionDir).replace(/\\/g, "/"), "broker.sock");
+  return `unix:${socketPath}`;
 }
 
 export function parseBrokerEndpoint(endpoint) {

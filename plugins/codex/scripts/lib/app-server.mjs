@@ -9,6 +9,7 @@
  */
 import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
@@ -48,7 +49,16 @@ function detectHostClientName() {
   if (process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR) {
     return "Claude Code";
   }
-  return "Grok";
+  // Prefer Grok when a local Grok home exists; otherwise Claude Code.
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    if (home && fs.existsSync(path.join(home, ".grok"))) {
+      return "Grok";
+    }
+  } catch {
+    // ignore
+  }
+  return "Claude Code";
 }
 
 /** @type {ClientInfo} */

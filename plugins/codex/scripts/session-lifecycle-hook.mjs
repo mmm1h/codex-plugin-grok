@@ -93,9 +93,16 @@ function resolveTranscriptPath(input) {
 
 function handleSessionStart(input) {
   const pluginData = resolvePluginDataDir();
-  const transcriptPath = resolveTranscriptPath(input);
+  const sessionId =
+    input.session_id ||
+    process.env.GROK_SESSION_ID ||
+    process.env.CODEX_COMPANION_SESSION_ID ||
+    null;
+  const transcriptPath = resolveTranscriptPath({ ...input, session_id: sessionId });
 
-  appendHostEnvVar(SESSION_ID_ENV, input.session_id);
+  if (sessionId) {
+    appendHostEnvVar(SESSION_ID_ENV, sessionId);
+  }
   if (transcriptPath) {
     appendHostEnvVar(TRANSCRIPT_PATH_ENV, transcriptPath);
   }

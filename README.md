@@ -30,7 +30,8 @@ grok plugin marketplace add mmm1h/codex-plugin-grok
 Or from a local checkout:
 
 ```bash
-grok plugin marketplace add C:/Users/PC/codex-plugin-grok
+grok plugin marketplace add /path/to/codex-plugin-grok
+# example: grok plugin marketplace add D:/git-pjt/codex-plugin-grok
 ```
 
 Install and trust the plugin:

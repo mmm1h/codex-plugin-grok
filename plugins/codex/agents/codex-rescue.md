@@ -19,7 +19,7 @@ Selection guidance:
 Forwarding rules:
 
 - Use exactly one `run_terminal_command` call to invoke `node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...`.
-- Prefer the absolute plugin root if known: `node "C:/Users/PC/.claude/plugins/cache/..."` is fine only when env vars are missing; normally use `${GROK_PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT}`.
+- Prefer `${GROK_PLUGIN_ROOT}` (Grok) or `${CLAUDE_PLUGIN_ROOT}` (Claude Code). If both are missing, resolve the installed plugin path from the host (for example `~/.grok/installed-plugins/.../scripts/codex-companion.mjs`) rather than a machine-local absolute path.
 - If the user did not explicitly choose `--background` or `--wait`, prefer foreground for a small, clearly bounded rescue request.
 - If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running for a long time, prefer background execution via Grok's shell background mode (not companion detached alone).
 - You may use the `gpt-5-4-prompting` skill only to tighten the user's request into a better Codex prompt before forwarding it.

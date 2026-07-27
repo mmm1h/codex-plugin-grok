@@ -7,6 +7,9 @@ import { resolveGrokHome, resolveClaudeHome } from "./host-env.mjs";
 
 export const TRANSCRIPT_PATH_ENV = "CODEX_COMPANION_TRANSCRIPT_PATH";
 
+/** Max characters retained per tool result body in converted transcripts. */
+const TOOL_RESULT_MAX_CHARS = 4000;
+
 function resolveUserPath(cwd, value) {
   if (value === "~") {
     return os.homedir();
@@ -25,6 +28,14 @@ function isInsideDir(parentDir, candidatePath) {
 function encodeGrokSessionGroup(cwd) {
   // Grok stores sessions under URL-encoded cwd names (Windows backslashes included).
   return encodeURIComponent(path.resolve(cwd));
+}
+
+function truncateText(text, max = TOOL_RESULT_MAX_CHARS) {
+  const value = String(text ?? "");
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`;
 }
 
 function extractTextContent(content) {
@@ -47,6 +58,14 @@ function extractTextContent(content) {
           if (typeof part.content === "string") {
             return part.content;
           }
+          // tool_use / function-call style parts embedded in content arrays
+          if (part.type === "tool_use" || part.type === "tool_call" || part.name) {
+            const name = part.name || part.tool_name || "tool";
+            const input = part.input ?? part.arguments ?? part.args;
+            const argsText =
+              typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
+            return `[tool_call ${name}] ${truncateText(argsText, 500)}`.trim();
+          }
         }
         return "";
       })
@@ -54,15 +73,70 @@ function extractTextContent(content) {
       .join("\n")
       .trim();
   }
-  if (typeof content === "object" && typeof content.text === "string") {
-    return content.text.trim();
+  if (typeof content === "object") {
+    if (typeof content.text === "string") {
+      return content.text.trim();
+    }
+    // Structured tool result objects
+    try {
+      return truncateText(JSON.stringify(content));
+    } catch {
+      return String(content).trim();
+    }
   }
   return String(content).trim();
+}
+
+function formatToolCalls(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+    return "";
+  }
+  return toolCalls
+    .map((call) => {
+      if (!call || typeof call !== "object") {
+        return "";
+      }
+      const name = call.name || call.tool_name || call.function?.name || "tool";
+      const id = call.id || call.tool_call_id || "";
+      const rawArgs = call.arguments ?? call.args ?? call.input ?? call.function?.arguments;
+      const argsText =
+        typeof rawArgs === "string" ? rawArgs : rawArgs != null ? JSON.stringify(rawArgs) : "";
+      const idPart = id ? ` id=${id}` : "";
+      return `[tool_call${idPart} ${name}] ${truncateText(argsText, 800)}`.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatToolResult(entry) {
+  const id = entry.tool_call_id || entry.toolCallId || entry.id || "";
+  const name = entry.tool_name || entry.name || "";
+  const body = extractTextContent(entry.content ?? entry.result ?? entry.output ?? entry.message?.content);
+  const header = ["[tool_result", name ? ` ${name}` : "", id ? ` id=${id}` : "", "]"].join("");
+  if (!body) {
+    return header;
+  }
+  return `${header}\n${truncateText(body)}`;
+}
+
+function pushTurn(out, type, cwd, text) {
+  const content = String(text ?? "").trim();
+  if (!content) {
+    return;
+  }
+  out.push({
+    type,
+    cwd,
+    message: { role: type === "assistant" ? "assistant" : "user", content }
+  });
 }
 
 /**
  * Convert a Grok session chat_history.jsonl into Claude-style JSONL that
  * Codex externalAgentConfig/import can consume.
+ *
+ * Preserves user turns, assistant text, tool_call summaries on assistant
+ * turns, and tool_result substance as user turns. Drops system/reasoning noise.
  */
 export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
   const raw = fs.readFileSync(sourcePath, "utf8");
@@ -90,27 +164,30 @@ export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
 
     if (type === "user") {
       const text = extractTextContent(entry.content ?? entry.message?.content ?? entry.text);
+      // Skip pure synthetic system-reminder blobs unless they carry a real user_query
       if (!text) {
         continue;
       }
-      out.push({
-        type: "user",
-        cwd,
-        message: { role: "user", content: text }
-      });
+      pushTurn(out, "user", cwd, text);
       continue;
     }
 
     if (type === "assistant" || type === "model") {
       const text = extractTextContent(entry.content ?? entry.message?.content ?? entry.text);
-      if (!text) {
-        continue;
-      }
-      out.push({
-        type: "assistant",
-        cwd,
-        message: { role: "assistant", content: text }
-      });
+      const tools = formatToolCalls(entry.tool_calls || entry.toolCalls || entry.message?.tool_calls);
+      const combined = [text, tools].filter(Boolean).join("\n\n");
+      pushTurn(out, "assistant", cwd, combined);
+      continue;
+    }
+
+    if (type === "tool_result" || type === "tool" || type === "function_result") {
+      pushTurn(out, "user", cwd, formatToolResult(entry));
+      continue;
+    }
+
+    // Some hosts nest tool results under role=tool
+    if (type === "tool_use" || type === "function_call") {
+      pushTurn(out, "assistant", cwd, formatToolCalls([entry]));
     }
   }
 
@@ -185,7 +262,7 @@ export function resolveSessionTransferSource(cwd, options = {}) {
   const requestedPath =
     options.source ||
     process.env[TRANSCRIPT_PATH_ENV] ||
-    autoResolveGrokTranscript(cwd, options.sessionId || process.env.CODEX_COMPANION_SESSION_ID);
+    autoResolveGrokTranscript(cwd, options.sessionId || process.env.CODEX_COMPANION_SESSION_ID || process.env.GROK_SESSION_ID);
 
   if (!requestedPath) {
     throw new Error(

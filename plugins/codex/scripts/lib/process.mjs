@@ -51,7 +51,11 @@ export function binaryAvailable(command, versionArgs = ["--version"], options = 
 }
 
 function looksLikeMissingProcessMessage(text) {
-  return /not found|no running instance|cannot find|does not exist|no such process/i.test(text);
+  // Include Chinese Windows taskkill messages ("找不到" / "不支持") and
+  // common English variants so cancel/cleanup does not hard-fail mid-teardown.
+  return /not found|no running instance|cannot find|does not exist|no such process|找不到|无法终止|不支持|access is denied|拒绝访问/i.test(
+    text
+  );
 }
 
 export function terminateProcessTree(pid, options = {}) {
@@ -75,6 +79,12 @@ export function terminateProcessTree(pid, options = {}) {
 
     const combinedOutput = `${result.stderr}\n${result.stdout}`.trim();
     if (!result.error && looksLikeMissingProcessMessage(combinedOutput)) {
+      return { attempted: true, delivered: false, method: "taskkill", result };
+    }
+
+    // taskkill can return non-zero for partial tree kills (e.g. protected
+    // children) even when the target PID is gone. Treat as best-effort stop.
+    if (!result.error && result.status !== 0) {
       return { attempted: true, delivered: false, method: "taskkill", result };
     }
 
