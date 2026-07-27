@@ -120,10 +120,9 @@ Notes:
 
 ### `/codex:transfer`
 
-Creates a persistent Codex thread from the current host session and prints `codex resume <session-id>`.
+Creates a persistent Codex thread from the current Grok session and prints `codex resume <session-id>`.
 
-- **Grok**: reads `~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl` and converts turns for Codex import
-- **Claude Code**: reads `~/.claude/projects/**/*.jsonl` natively
+Reads `~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl` and converts turns (including tool call/result summaries) for Codex import.
 
 ```bash
 /codex:transfer
@@ -152,15 +151,15 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 /codex:setup --disable-review-gate
 ```
 
-## Grok-specific design
+## Grok design notes
 
 | Area | Behavior |
 |------|----------|
-| Plugin env | Prefers `GROK_PLUGIN_ROOT` / `GROK_PLUGIN_DATA`; falls back to `CLAUDE_PLUGIN_*` (Grok sets both) |
+| Plugin env | `GROK_PLUGIN_ROOT` / `GROK_PLUGIN_DATA` / `GROK_SESSION_ID` |
 | Tools in commands | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
 | Background work | Prefer Grok shell `background: true` (has completion callbacks). Avoid relying only on companion `--background` detached workers for agent orchestration |
 | Session transfer | Grok chat history auto-converted before Codex external import |
-| Marketplace layout | `.grok-plugin/marketplace.json` (+ `.claude-plugin` for dual-host) |
+| Marketplace layout | `.grok-plugin/marketplace.json` only |
 
 ## Direct CLI (without slash commands)
 
@@ -170,15 +169,6 @@ Grok can also call the companion script or `codex exec` directly:
 node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the failing test"
 # or
 codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
-```
-
-## Install for Claude Code (optional)
-
-This fork still understands Claude-compatible env vars and Claude session paths:
-
-```bash
-/plugin marketplace add mmm1h/codex-plugin-grok
-/plugin install codex@codex-plugin-grok
 ```
 
 ## Develop / test
