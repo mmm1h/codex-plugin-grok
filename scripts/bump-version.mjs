@@ -51,6 +51,30 @@ const TARGETS = [
     ]
   },
   {
+    file: "plugins/codex/.grok-plugin/plugin.json",
+    values: [
+      {
+        label: "version",
+        get: (json) => json.version,
+        set: (json, version) => {
+          json.version = version;
+        }
+      }
+    ]
+  },
+  {
+    file: "plugins/codex/plugin.json",
+    values: [
+      {
+        label: "version",
+        get: (json) => json.version,
+        set: (json, version) => {
+          json.version = version;
+        }
+      }
+    ]
+  },
+  {
     file: ".claude-plugin/marketplace.json",
     values: [
       {
@@ -58,6 +82,26 @@ const TARGETS = [
         get: (json) => json.metadata?.version,
         set: (json, version) => {
           requireObject(json.metadata, ".claude-plugin/marketplace.json metadata");
+          json.metadata.version = version;
+        }
+      },
+      {
+        label: "plugins[codex].version",
+        get: (json) => findMarketplacePlugin(json).version,
+        set: (json, version) => {
+          findMarketplacePlugin(json).version = version;
+        }
+      }
+    ]
+  },
+  {
+    file: ".grok-plugin/marketplace.json",
+    values: [
+      {
+        label: "metadata.version",
+        get: (json) => json.metadata?.version,
+        set: (json, version) => {
+          requireObject(json.metadata, ".grok-plugin/marketplace.json metadata");
           json.metadata.version = version;
         }
       },
@@ -144,7 +188,12 @@ function readJson(root, file) {
 
 function writeJson(root, file, json) {
   const filePath = path.join(root, file);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(json, null, 2)}\n`);
+}
+
+function targetExists(root, file) {
+  return fs.existsSync(path.join(root, file));
 }
 
 function readPackageVersion(root) {
@@ -160,6 +209,10 @@ function checkVersions(root, expectedVersion) {
   const mismatches = [];
 
   for (const target of TARGETS) {
+    if (!targetExists(root, target.file)) {
+      // Optional dual-host manifests may be absent in older fixtures.
+      continue;
+    }
     const json = readJson(root, target.file);
     for (const value of target.values) {
       const actual = value.get(json);
@@ -176,6 +229,9 @@ function bumpVersion(root, version) {
   const changedFiles = [];
 
   for (const target of TARGETS) {
+    if (!targetExists(root, target.file)) {
+      continue;
+    }
     const json = readJson(root, target.file);
     const before = JSON.stringify(json);
 

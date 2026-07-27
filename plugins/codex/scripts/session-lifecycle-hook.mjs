@@ -14,11 +14,11 @@ import {
   teardownBrokerSession
 } from "./lib/broker-lifecycle.mjs";
 import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
-import { TRANSCRIPT_PATH_ENV } from "./lib/claude-session-transfer.mjs";
+import { TRANSCRIPT_PATH_ENV } from "./lib/session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
+import { appendHostEnvVar, resolvePluginDataDir } from "./lib/host-env.mjs";
 
 export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
-const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
 
 function readHookInput() {
   const raw = fs.readFileSync(0, "utf8").trim();
@@ -26,17 +26,6 @@ function readHookInput() {
     return {};
   }
   return JSON.parse(raw);
-}
-
-function shellEscape(value) {
-  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
-}
-
-function appendEnvVar(name, value) {
-  if (!process.env.CLAUDE_ENV_FILE || value == null || value === "") {
-    return;
-  }
-  fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export ${name}=${shellEscape(value)}\n`, "utf8");
 }
 
 function cleanupSessionJobs(cwd, sessionId) {
@@ -74,10 +63,47 @@ function cleanupSessionJobs(cwd, sessionId) {
   });
 }
 
+function resolveTranscriptPath(input) {
+  if (input.transcript_path) {
+    return input.transcript_path;
+  }
+  // Grok sessions live under ~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl
+  if (input.session_id && input.cwd) {
+    const encoded = encodeURIComponent(String(input.cwd));
+    const grokHome = process.env.GROK_HOME || `${process.env.USERPROFILE || process.env.HOME || ""}/.grok`.replace(/\\/g, "\\");
+    // Prefer path.join style via string concat for hook simplicity across hosts.
+    const candidate = [
+      process.env.GROK_HOME,
+      process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.grok` : null,
+      process.env.HOME ? `${process.env.HOME}/.grok` : null
+    ]
+      .filter(Boolean)
+      .map((home) => {
+        const sep = home.includes("\\") ? "\\" : "/";
+        return `${home}${sep}sessions${sep}${encoded}${sep}${input.session_id}${sep}chat_history.jsonl`;
+      });
+    for (const pathCandidate of candidate) {
+      if (pathCandidate && fs.existsSync(pathCandidate)) {
+        return pathCandidate;
+      }
+    }
+  }
+  return null;
+}
+
 function handleSessionStart(input) {
-  appendEnvVar(SESSION_ID_ENV, input.session_id);
-  appendEnvVar(TRANSCRIPT_PATH_ENV, input.transcript_path);
-  appendEnvVar(PLUGIN_DATA_ENV, process.env[PLUGIN_DATA_ENV]);
+  const pluginData = resolvePluginDataDir();
+  const transcriptPath = resolveTranscriptPath(input);
+
+  appendHostEnvVar(SESSION_ID_ENV, input.session_id);
+  if (transcriptPath) {
+    appendHostEnvVar(TRANSCRIPT_PATH_ENV, transcriptPath);
+  }
+  if (pluginData) {
+    // Export both names so downstream scripts work on either host.
+    appendHostEnvVar("GROK_PLUGIN_DATA", pluginData);
+    appendHostEnvVar("CLAUDE_PLUGIN_DATA", pluginData);
+  }
 }
 
 async function handleSessionEnd(input) {

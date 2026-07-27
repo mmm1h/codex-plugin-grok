@@ -21,7 +21,7 @@ import {
     runAppServerReview,
     runAppServerTurn
   } from "./lib/codex.mjs";
-import { resolveClaudeSessionPath } from "./lib/claude-session-transfer.mjs";
+import { resolveSessionTransferSource } from "./lib/session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
@@ -80,7 +80,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
-      "  node scripts/codex-companion.mjs transfer [--source <claude-jsonl>] [--json]",
+      "  node scripts/codex-companion.mjs transfer [--source <session-jsonl>] [--json]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
@@ -614,24 +614,35 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
 }
 
 function renderTransferResult(payload) {
+  const hostLabel = payload.host === "grok" ? "Grok" : payload.host === "claude" ? "Claude Code" : "host";
   const lines = [
-    "Transferred the Claude session into a Codex thread with visible turn history.",
+    `Transferred the ${hostLabel} session into a Codex thread with visible turn history.`,
     `Codex session ID: ${payload.threadId}`,
     `Resume in Codex: ${payload.resumeCommand}`
   ];
+  if (payload.converted) {
+    lines.push("Note: Grok chat history was converted to Codex-importable turns before transfer.");
+  }
   return `${lines.join("\n")}\n`;
 }
 
 async function executeTransfer(cwd, options = {}) {
-  const sourcePath = resolveClaudeSessionPath(cwd, {
+  const transfer = resolveSessionTransferSource(cwd, {
     source: options.source
   });
-  const result = await importExternalAgentSession(cwd, { sourcePath });
+  const result = await importExternalAgentSession(cwd, { sourcePath: transfer.importPath });
+  const sessionId =
+    transfer.host === "grok"
+      ? path.basename(path.dirname(transfer.sourcePath))
+      : path.basename(transfer.sourcePath, ".jsonl");
   const payload = {
     threadId: result.threadId,
     resumeCommand: `codex resume ${result.threadId}`,
-    sourcePath,
-    sessionId: path.basename(sourcePath, ".jsonl")
+    sourcePath: transfer.sourcePath,
+    importPath: transfer.importPath,
+    host: transfer.host,
+    converted: Boolean(transfer.converted),
+    sessionId
   };
 
   return {

@@ -1,6 +1,6 @@
 ---
 name: gpt-5-4-prompting
-description: Internal guidance for composing Codex and GPT-5.4 prompts for coding, review, diagnosis, and research tasks inside the Codex Claude Code plugin
+description: Internal guidance for composing Codex and GPT-5.4 prompts for coding, review, diagnosis, and research tasks inside the Codex Grok plugin
 user-invocable: false
 ---
 

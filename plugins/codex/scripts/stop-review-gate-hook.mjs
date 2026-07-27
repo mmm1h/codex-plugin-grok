@@ -48,11 +48,13 @@ function filterJobsForCurrentSession(jobs, input = {}) {
 function buildStopReviewPrompt(input = {}) {
   const lastAssistantMessage = String(input.last_assistant_message ?? "").trim();
   const template = loadPromptTemplate(ROOT_DIR, "stop-review-gate");
-  const claudeResponseBlock = lastAssistantMessage
-    ? ["Previous Claude response:", lastAssistantMessage].join("\n")
+  const hostResponseBlock = lastAssistantMessage
+    ? ["Previous host agent response:", lastAssistantMessage].join("\n")
     : "";
   return interpolateTemplate(template, {
-    CLAUDE_RESPONSE_BLOCK: claudeResponseBlock
+    HOST_RESPONSE_BLOCK: hostResponseBlock,
+    // Keep legacy placeholder for older templates.
+    CLAUDE_RESPONSE_BLOCK: hostResponseBlock
   });
 }
 
@@ -141,7 +143,11 @@ function runStopReview(cwd, input = {}) {
 
 function main() {
   const input = readHookInput();
-  const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const cwd =
+    input.cwd ||
+    process.env.GROK_PROJECT_DIR ||
+    process.env.CLAUDE_PROJECT_DIR ||
+    process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const config = getConfig(workspaceRoot);
 

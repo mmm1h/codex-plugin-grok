@@ -12,20 +12,49 @@ import net from "node:net";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { parseBrokerEndpoint } from "./broker-endpoint.mjs";
 import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 
-const PLUGIN_MANIFEST_URL = new URL("../../.claude-plugin/plugin.json", import.meta.url);
-const PLUGIN_MANIFEST = JSON.parse(fs.readFileSync(PLUGIN_MANIFEST_URL, "utf8"));
+function loadPluginManifest() {
+  const candidates = [
+    new URL("../../.grok-plugin/plugin.json", import.meta.url),
+    new URL("../../.claude-plugin/plugin.json", import.meta.url),
+    new URL("../../plugin.json", import.meta.url)
+  ];
+  for (const url of candidates) {
+    try {
+      const filePath = fileURLToPath(url);
+      if (fs.existsSync(filePath)) {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+      }
+    } catch {
+      // continue
+    }
+  }
+  return { version: "0.0.0" };
+}
+
+const PLUGIN_MANIFEST = loadPluginManifest();
 
 export const BROKER_ENDPOINT_ENV = "CODEX_COMPANION_APP_SERVER_ENDPOINT";
 export const BROKER_BUSY_RPC_CODE = -32001;
 
+function detectHostClientName() {
+  if (process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME || process.env.GROK_SESSION_ID) {
+    return "Grok";
+  }
+  if (process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR) {
+    return "Claude Code";
+  }
+  return "Grok";
+}
+
 /** @type {ClientInfo} */
 const DEFAULT_CLIENT_INFO = {
   title: "Codex Plugin",
-  name: "Claude Code",
+  name: detectHostClientName(),
   version: PLUGIN_MANIFEST.version ?? "0.0.0"
 };
 

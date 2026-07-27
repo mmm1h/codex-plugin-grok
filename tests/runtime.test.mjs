@@ -303,13 +303,14 @@ test("transfer fails visibly when native import completes without a ledger recor
   assert.match(result.stderr, /did not record an imported thread/);
 });
 
-test("transfer rejects sources outside the Claude projects directory", () => {
+test("transfer rejects sources outside Claude projects and Grok sessions directories", () => {
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
   const sourcePath = path.join(home, "session.jsonl");
   fs.mkdirSync(repo, { recursive: true });
   fs.mkdirSync(path.join(home, ".claude", "projects"), { recursive: true });
+  fs.mkdirSync(path.join(home, ".grok", "sessions"), { recursive: true });
   installFakeCodex(binDir);
   initGitRepo(repo);
   fs.writeFileSync(
@@ -320,11 +321,11 @@ test("transfer rejects sources outside the Claude projects directory", () => {
 
   const result = run("node", [SCRIPT, "transfer", "--source", sourcePath], {
     cwd: repo,
-    env: { ...buildEnv(binDir), HOME: home }
+    env: { ...buildEnv(binDir), HOME: home, USERPROFILE: home, GROK_HOME: path.join(home, ".grok") }
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /only from .*\.claude.*projects/);
+  assert.match(result.stderr, /must live under|only from/i);
 });
 
 test("task reports the actual Codex auth error when the run is rejected", () => {
@@ -669,9 +670,9 @@ test("task --resume-last ignores running tasks from other Claude sessions", () =
   assert.match(resume.stderr, /No previous Codex task thread was found for this repository\./);
 });
 
-test("session start hook exports the Claude session id, transcript path, and plugin data dir", () => {
+test("session start hook exports the host session id, transcript path, and plugin data dir", () => {
   const repo = makeTempDir();
-  const envFile = path.join(makeTempDir(), "claude-env.sh");
+  const envFile = path.join(makeTempDir(), "host-env.sh");
   fs.writeFileSync(envFile, "", "utf8");
   const pluginDataDir = makeTempDir();
   const transcriptPath = path.join(repo, "session.jsonl");
@@ -692,10 +693,11 @@ test("session start hook exports the Claude session id, transcript path, and plu
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    fs.readFileSync(envFile, "utf8"),
-    `export CODEX_COMPANION_SESSION_ID='sess-current'\nexport CODEX_COMPANION_TRANSCRIPT_PATH='${transcriptPath}'\nexport CLAUDE_PLUGIN_DATA='${pluginDataDir}'\n`
-  );
+  const exported = fs.readFileSync(envFile, "utf8");
+  assert.match(exported, /export CODEX_COMPANION_SESSION_ID='sess-current'/);
+  assert.match(exported, new RegExp(`export CODEX_COMPANION_TRANSCRIPT_PATH='${transcriptPath.replace(/\\/g, "\\\\")}'`));
+  assert.match(exported, /export CLAUDE_PLUGIN_DATA=/);
+  assert.match(exported, /export GROK_PLUGIN_DATA=/);
 });
 
 test("write task output focuses on the Codex result without generic follow-up hints", () => {

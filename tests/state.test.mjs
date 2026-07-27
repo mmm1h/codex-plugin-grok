@@ -20,6 +20,8 @@ test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
   const workspace = makeTempDir();
   const pluginDataDir = makeTempDir();
   const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
+  const previousGrokPluginDataDir = process.env.GROK_PLUGIN_DATA;
+  delete process.env.GROK_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
 
   try {
@@ -37,6 +39,31 @@ test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
     } else {
       process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
     }
+    if (previousGrokPluginDataDir == null) {
+      delete process.env.GROK_PLUGIN_DATA;
+    } else {
+      process.env.GROK_PLUGIN_DATA = previousGrokPluginDataDir;
+    }
+  }
+});
+
+test("resolveStateDir prefers GROK_PLUGIN_DATA over CLAUDE_PLUGIN_DATA", () => {
+  const workspace = makeTempDir();
+  const grokData = makeTempDir();
+  const claudeData = makeTempDir();
+  const previousGrok = process.env.GROK_PLUGIN_DATA;
+  const previousClaude = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.GROK_PLUGIN_DATA = grokData;
+  process.env.CLAUDE_PLUGIN_DATA = claudeData;
+
+  try {
+    const stateDir = resolveStateDir(workspace);
+    assert.equal(stateDir.startsWith(path.join(grokData, "state")), true);
+  } finally {
+    if (previousGrok == null) delete process.env.GROK_PLUGIN_DATA;
+    else process.env.GROK_PLUGIN_DATA = previousGrok;
+    if (previousClaude == null) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = previousClaude;
   }
 });
 

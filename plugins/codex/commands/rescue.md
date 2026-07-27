@@ -1,11 +1,11 @@
 ---
 description: Delegate investigation, an explicit fix request, or follow-up rescue work to the Codex rescue subagent
 argument-hint: "[--background|--wait] [--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [what Codex should investigate, solve, or continue]"
-allowed-tools: Bash(node:*), AskUserQuestion, Agent
+allowed-tools: run_terminal_command, ask_user_question, spawn_subagent
 ---
 
-Invoke the `codex:codex-rescue` subagent via the `Agent` tool (`subagent_type: "codex:codex-rescue"`), forwarding the raw user request as the prompt.
-`codex:codex-rescue` is a subagent, not a skill — do not call `Skill(codex:codex-rescue)` (no such skill) or `Skill(codex:rescue)` (that re-enters this command and hangs the session). The command runs inline so the `Agent` tool stays in scope; forked general-purpose subagents do not expose it.
+Invoke the `codex:codex-rescue` subagent via `spawn_subagent` (`subagent_type: "codex:codex-rescue"`), forwarding the raw user request as the prompt.
+`codex:codex-rescue` is a subagent, not a skill — do not call a skill named `codex:codex-rescue` or re-enter this command. Run inline so the subagent tool stays in scope.
 The final user-visible response must be Codex's output verbatim.
 
 Raw user request:
@@ -13,20 +13,20 @@ $ARGUMENTS
 
 Execution mode:
 
-- If the request includes `--background`, run the `codex:codex-rescue` subagent in the background.
+- If the request includes `--background`, run the `codex:codex-rescue` subagent in the background (`background: true`).
 - If the request includes `--wait`, run the `codex:codex-rescue` subagent in the foreground.
 - If neither flag is present, default to foreground.
-- `--background` and `--wait` are execution flags for Claude Code. Do not forward them to `task`, and do not treat them as part of the natural-language task text.
+- `--background` and `--wait` are execution flags for Grok. Do not forward them to `task`, and do not treat them as part of the natural-language task text.
 - `--model` and `--effort` are runtime-selection flags. Preserve them for the forwarded `task` call, but do not treat them as part of the natural-language task text.
 - If the request includes `--resume`, do not ask whether to continue. The user already chose.
 - If the request includes `--fresh`, do not ask whether to continue. The user already chose.
-- Otherwise, before starting Codex, check for a resumable rescue thread from this Claude session by running:
+- Otherwise, before starting Codex, check for a resumable rescue thread from this host session by running:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task-resume-candidate --json
+node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task-resume-candidate --json
 ```
 
-- If that helper reports `available: true`, use `AskUserQuestion` exactly once to ask whether to continue the current Codex thread or start a new one.
+- If that helper reports `available: true`, use `ask_user_question` exactly once to ask whether to continue the current Codex thread or start a new one.
 - The two choices must be:
   - `Continue current Codex thread`
   - `Start a new Codex thread`
@@ -38,7 +38,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task-resume-candidate -
 
 Operating rules:
 
-- The subagent is a thin forwarder only. It should use one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...` and return that command's stdout as-is.
+- The subagent is a thin forwarder only. It should use one shell call to invoke `node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...` and return that command's stdout as-is.
 - Return the Codex companion stdout verbatim to the user.
 - Do not paraphrase, summarize, rewrite, or add commentary before or after it.
 - Do not ask the subagent to inspect files, monitor progress, poll `/codex:status`, fetch `/codex:result`, call `/codex:cancel`, summarize output, or do follow-up work of its own.

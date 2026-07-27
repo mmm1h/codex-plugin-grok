@@ -44,7 +44,10 @@ import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from 
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
 
-const SERVICE_NAME = "claude_code_codex_plugin";
+const SERVICE_NAME =
+  process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME
+    ? "grok_codex_plugin"
+    : "claude_code_codex_plugin";
 const TASK_THREAD_PREFIX = "Codex Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
   "Continue from the current thread state. Pick the next highest-value step and follow through until the task is resolved.";
@@ -683,7 +686,7 @@ function externalAgentSessionMigration(sourcePath, cwd) {
     migrationItems: [
       {
         itemType: "SESSIONS",
-        description: `Transfer Claude session ${path.basename(sourcePath)}`,
+        description: `Transfer host session ${path.basename(sourcePath)}`,
         cwd: null,
         details: {
           plugins: [],
@@ -1061,11 +1064,11 @@ export async function importExternalAgentSession(cwd, options = {}) {
     throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
   }
   if (!options.sourcePath) {
-    throw new Error("A Claude session source path is required.");
+    throw new Error("A host session source path is required.");
   }
 
   return withDirectAppServer(cwd, async (client) => {
-    emitProgress(options.onProgress, "Importing Claude session into Codex.", "transferring");
+    emitProgress(options.onProgress, "Importing host session into Codex.", "transferring");
     try {
       await requestExternalAgentSessionImport(client, externalAgentSessionMigration(options.sourcePath, cwd));
     } catch (error) {
@@ -1081,10 +1084,10 @@ export async function importExternalAgentSession(cwd, options = {}) {
     if (!threadId) {
       const stderr = cleanCodexStderr(client.stderr);
       throw new Error(
-        `Codex reported that the Claude import completed, but did not record an imported thread.${stderr ? `\n${stderr}` : " Check the Codex app-server logs for the underlying import error."}`
+        `Codex reported that the host session import completed, but did not record an imported thread.${stderr ? `\n${stderr}` : " Check the Codex app-server logs for the underlying import error."}`
       );
     }
-    emitProgress(options.onProgress, `Claude session imported (${threadId}).`, "completed", { threadId });
+    emitProgress(options.onProgress, `Host session imported (${threadId}).`, "completed", { threadId });
     return {
       threadId,
       stderr: cleanCodexStderr(client.stderr)
