@@ -16,9 +16,17 @@ import {
 import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
-import { appendHostEnvVar, resolvePluginDataDir } from "./lib/host-env.mjs";
+import {
+  appendHostEnvVar,
+  COMPANION_SESSION_ID_ENV,
+  resolveHookCwd,
+  resolveHookEventName,
+  resolveHookTranscriptPathField,
+  resolveHostSessionId,
+  resolvePluginDataDir
+} from "./lib/host-env.mjs";
 
-export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
+export const SESSION_ID_ENV = COMPANION_SESSION_ID_ENV;
 
 function readHookInput() {
   const raw = fs.readFileSync(0, "utf8").trim();
@@ -28,21 +36,21 @@ function readHookInput() {
   return JSON.parse(raw);
 }
 
-function cleanupSessionJobs(cwd, sessionId) {
+export function cleanupSessionJobs(cwd, sessionId) {
   if (!cwd || !sessionId) {
-    return;
+    return { cleaned: false, removed: 0 };
   }
 
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateFile = resolveStateFile(workspaceRoot);
   if (!fs.existsSync(stateFile)) {
-    return;
+    return { cleaned: false, removed: 0 };
   }
 
   const state = loadState(workspaceRoot);
   const removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
   if (removedJobs.length === 0) {
-    return;
+    return { cleaned: false, removed: 0 };
   }
 
   for (const job of removedJobs) {
@@ -61,17 +69,18 @@ function cleanupSessionJobs(cwd, sessionId) {
     ...state,
     jobs: state.jobs.filter((job) => job.sessionId !== sessionId)
   });
+  return { cleaned: true, removed: removedJobs.length };
 }
 
-function resolveTranscriptPath(input) {
-  if (input.transcript_path) {
-    return input.transcript_path;
+function resolveTranscriptPath(input, sessionId) {
+  const explicit = resolveHookTranscriptPathField(input);
+  if (explicit) {
+    return explicit;
   }
+  const cwd = resolveHookCwd(input);
   // Grok sessions live under ~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl
-  if (input.session_id && input.cwd) {
-    const encoded = encodeURIComponent(String(input.cwd));
-    const grokHome = process.env.GROK_HOME || `${process.env.USERPROFILE || process.env.HOME || ""}/.grok`.replace(/\\/g, "\\");
-    // Prefer path.join style via string concat for hook simplicity across hosts.
+  if (sessionId && cwd) {
+    const encoded = encodeURIComponent(String(cwd));
     const candidate = [
       process.env.GROK_HOME,
       process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.grok` : null,
@@ -80,7 +89,7 @@ function resolveTranscriptPath(input) {
       .filter(Boolean)
       .map((home) => {
         const sep = home.includes("\\") ? "\\" : "/";
-        return `${home}${sep}sessions${sep}${encoded}${sep}${input.session_id}${sep}chat_history.jsonl`;
+        return `${home}${sep}sessions${sep}${encoded}${sep}${sessionId}${sep}chat_history.jsonl`;
       });
     for (const pathCandidate of candidate) {
       if (pathCandidate && fs.existsSync(pathCandidate)) {
@@ -91,14 +100,10 @@ function resolveTranscriptPath(input) {
   return null;
 }
 
-function handleSessionStart(input) {
+export function handleSessionStart(input, env = process.env) {
   const pluginData = resolvePluginDataDir();
-  const sessionId =
-    input.session_id ||
-    process.env.GROK_SESSION_ID ||
-    process.env.CODEX_COMPANION_SESSION_ID ||
-    null;
-  const transcriptPath = resolveTranscriptPath({ ...input, session_id: sessionId });
+  const sessionId = resolveHostSessionId(input, env);
+  const transcriptPath = resolveTranscriptPath(input, sessionId);
 
   if (sessionId) {
     appendHostEnvVar(SESSION_ID_ENV, sessionId);
@@ -111,17 +116,19 @@ function handleSessionStart(input) {
     appendHostEnvVar("GROK_PLUGIN_DATA", pluginData);
     appendHostEnvVar("CLAUDE_PLUGIN_DATA", pluginData);
   }
+  return { sessionId, transcriptPath, pluginData };
 }
 
-async function handleSessionEnd(input) {
-  const cwd = input.cwd || process.cwd();
+export async function handleSessionEnd(input, env = process.env) {
+  const cwd = resolveHookCwd(input, env);
+  const sessionId = resolveHostSessionId(input, env);
   const brokerSession =
     loadBrokerSession(cwd) ??
-    (process.env[BROKER_ENDPOINT_ENV]
+    (env[BROKER_ENDPOINT_ENV]
       ? {
-          endpoint: process.env[BROKER_ENDPOINT_ENV],
-          pidFile: process.env[PID_FILE_ENV] ?? null,
-          logFile: process.env[LOG_FILE_ENV] ?? null
+          endpoint: env[BROKER_ENDPOINT_ENV],
+          pidFile: env[PID_FILE_ENV] ?? null,
+          logFile: env[LOG_FILE_ENV] ?? null
         }
       : null);
   const brokerEndpoint = brokerSession?.endpoint ?? null;
@@ -134,7 +141,7 @@ async function handleSessionEnd(input) {
     await sendBrokerShutdown(brokerEndpoint);
   }
 
-  cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
+  const cleanup = cleanupSessionJobs(cwd, sessionId);
   teardownBrokerSession({
     endpoint: brokerEndpoint,
     pidFile,
@@ -144,23 +151,31 @@ async function handleSessionEnd(input) {
     killProcess: terminateProcessTree
   });
   clearBrokerSession(cwd);
+  return { cwd, sessionId, cleanup };
 }
 
 async function main() {
   const input = readHookInput();
-  const eventName = process.argv[2] ?? input.hook_event_name ?? "";
+  const eventName = resolveHookEventName(input, process.argv[2] ?? "");
 
-  if (eventName === "SessionStart") {
+  if (eventName === "SessionStart" || eventName === "session_start" || eventName === "sessionStart") {
     handleSessionStart(input);
     return;
   }
 
-  if (eventName === "SessionEnd") {
+  if (eventName === "SessionEnd" || eventName === "session_end" || eventName === "sessionEnd") {
     await handleSessionEnd(input);
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+const isDirectRun =
+  process.argv[1] &&
+  (process.argv[1].endsWith("session-lifecycle-hook.mjs") ||
+    process.argv[1].endsWith("session-lifecycle-hook.js"));
+
+if (isDirectRun) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+}

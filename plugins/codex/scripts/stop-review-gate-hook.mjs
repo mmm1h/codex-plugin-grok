@@ -12,6 +12,11 @@ import { getConfig, listJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
 import { SESSION_ID_ENV } from "./lib/tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
+import {
+  resolveHookCwd,
+  resolveHostSessionId,
+  resolveLastAssistantMessage
+} from "./lib/host-env.mjs";
 
 const STOP_REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -37,8 +42,8 @@ function logNote(message) {
   process.stderr.write(`${message}\n`);
 }
 
-function filterJobsForCurrentSession(jobs, input = {}) {
-  const sessionId = input.session_id || process.env[SESSION_ID_ENV] || null;
+function filterJobsForCurrentSession(jobs, input = {}, env = process.env) {
+  const sessionId = resolveHostSessionId(input, env);
   if (!sessionId) {
     return jobs;
   }
@@ -46,7 +51,7 @@ function filterJobsForCurrentSession(jobs, input = {}) {
 }
 
 function buildStopReviewPrompt(input = {}) {
-  const lastAssistantMessage = String(input.last_assistant_message ?? "").trim();
+  const lastAssistantMessage = resolveLastAssistantMessage(input);
   const template = loadPromptTemplate(ROOT_DIR, "stop-review-gate");
   const hostResponseBlock = lastAssistantMessage
     ? ["Previous host agent response:", lastAssistantMessage].join("\n")
@@ -97,12 +102,18 @@ function parseStopReviewOutput(rawOutput) {
   };
 }
 
-function runStopReview(cwd, input = {}) {
+function runStopReview(cwd, input = {}, env = process.env) {
   const scriptPath = path.join(SCRIPT_DIR, "codex-companion.mjs");
   const prompt = buildStopReviewPrompt(input);
+  const sessionId = resolveHostSessionId(input, env);
   const childEnv = {
-    ...process.env,
-    ...(input.session_id ? { [SESSION_ID_ENV]: input.session_id } : {})
+    ...env,
+    ...(sessionId
+      ? {
+          [SESSION_ID_ENV]: sessionId,
+          GROK_SESSION_ID: env.GROK_SESSION_ID || sessionId
+        }
+      : {})
   };
   const result = spawnSync(process.execPath, [scriptPath, "task", "--json", prompt], {
     cwd,
@@ -143,11 +154,7 @@ function runStopReview(cwd, input = {}) {
 
 function main() {
   const input = readHookInput();
-  const cwd =
-    input.cwd ||
-    process.env.GROK_PROJECT_DIR ||
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.cwd();
+  const cwd = resolveHookCwd(input);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const config = getConfig(workspaceRoot);
 
@@ -181,10 +188,25 @@ function main() {
   logNote(runningTaskNote);
 }
 
-try {
-  main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
+// Exported for unit tests (Grok camelCase envelope coverage).
+export {
+  filterJobsForCurrentSession,
+  buildStopReviewPrompt,
+  resolveHostSessionId,
+  resolveLastAssistantMessage
+};
+
+const isDirectRun =
+  process.argv[1] &&
+  (process.argv[1].endsWith("stop-review-gate-hook.mjs") ||
+    process.argv[1].endsWith("stop-review-gate-hook.js"));
+
+if (isDirectRun) {
+  try {
+    main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 }

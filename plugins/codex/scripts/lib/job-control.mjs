@@ -13,7 +13,13 @@ export function sortJobsNewestFirst(jobs) {
 }
 
 function getCurrentSessionId(options = {}) {
-  return options.env?.[SESSION_ID_ENV] ?? process.env[SESSION_ID_ENV] ?? null;
+  const env = options.env ?? process.env;
+  return (
+    env[SESSION_ID_ENV] ||
+    env.CODEX_COMPANION_SESSION_ID ||
+    env.GROK_SESSION_ID ||
+    null
+  );
 }
 
 function filterJobsForCurrentSession(jobs, options = {}) {

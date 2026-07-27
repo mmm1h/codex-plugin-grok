@@ -59,7 +59,9 @@ export function createJobLogFile(workspaceRoot, jobId, title) {
 
 export function createJobRecord(base, options = {}) {
   const env = options.env ?? process.env;
-  const sessionId = env[options.sessionIdEnv ?? SESSION_ID_ENV];
+  const primary = options.sessionIdEnv ?? SESSION_ID_ENV;
+  // Prefer the companion export, then Grok's always-present session id.
+  const sessionId = env[primary] || env.CODEX_COMPANION_SESSION_ID || env.GROK_SESSION_ID || null;
   return {
     ...base,
     createdAt: nowIso(),

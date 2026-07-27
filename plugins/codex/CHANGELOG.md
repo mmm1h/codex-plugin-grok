@@ -6,6 +6,8 @@
 - Dual marketplace manifests: `.grok-plugin/` and `.claude-plugin/`
 - Host env dual-read: `GROK_PLUGIN_*` preferred, `CLAUDE_PLUGIN_*` fallback
 - Hooks use `${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}` so Grok-only env resolves SessionStart/End/Stop
+- Hook envelopes accept Grok camelCase (`sessionId`, `lastAssistantMessage`, `hookEventName`) and Claude snake_case
+- Session scoping falls back to always-injected `GROK_SESSION_ID` when companion env-file export is unavailable
 - Commands/agents rewritten for Grok tools (`run_terminal_command`, `spawn_subagent`, `ask_user_question`)
 - Session transfer supports Grok `~/.grok/sessions/**/chat_history.jsonl` (auto-converts to Codex import format)
 - Grok transfer retains user/assistant text plus tool_call and tool_result summaries (drops pure reasoning)

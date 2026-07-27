@@ -291,8 +291,15 @@ function isActiveJobStatus(status) {
   return status === "queued" || status === "running";
 }
 
-function getCurrentClaudeSessionId() {
-  return process.env[SESSION_ID_ENV] ?? null;
+function getCurrentClaudeSessionId(env = process.env) {
+  // Dual-host: Grok always injects GROK_SESSION_ID; companion may also publish
+  // CODEX_COMPANION_SESSION_ID when SessionStart can write an env file.
+  return (
+    env[SESSION_ID_ENV] ||
+    env.CODEX_COMPANION_SESSION_ID ||
+    env.GROK_SESSION_ID ||
+    null
+  );
 }
 
 function filterJobsForCurrentClaudeSession(jobs) {

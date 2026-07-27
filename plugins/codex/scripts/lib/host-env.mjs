@@ -66,6 +66,79 @@ export function resolvePluginRoot() {
   return firstDefinedEnv("GROK_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT");
 }
 
+/**
+ * Companion jobs are scoped by CODEX_COMPANION_SESSION_ID when SessionStart can
+ * export it. On Grok, GROK_SESSION_ID is always injected into hook/agent
+ * processes and is the reliable fallback when GROK_ENV_FILE is absent.
+ */
+export const COMPANION_SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value == null) {
+      continue;
+    }
+    const text = String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the host session id from a hook stdin envelope and/or process env.
+ * Accepts Grok camelCase (sessionId) and Claude snake_case (session_id).
+ */
+export function resolveHostSessionId(input = {}, env = process.env) {
+  return firstNonEmpty(
+    input?.sessionId,
+    input?.session_id,
+    env.GROK_SESSION_ID,
+    env[COMPANION_SESSION_ID_ENV],
+    env.CODEX_COMPANION_SESSION_ID
+  );
+}
+
+/**
+ * Resolve the last assistant message for Stop/SubagentStop gates.
+ * Grok: lastAssistantMessage; Claude: last_assistant_message.
+ */
+export function resolveLastAssistantMessage(input = {}) {
+  return firstNonEmpty(input?.lastAssistantMessage, input?.last_assistant_message) || "";
+}
+
+/**
+ * Resolve workspace cwd from a hook envelope.
+ */
+export function resolveHookCwd(input = {}, env = process.env, fallbackCwd = process.cwd()) {
+  return (
+    firstNonEmpty(
+      input?.cwd,
+      input?.workspaceRoot,
+      input?.workspace_root,
+      env.GROK_WORKSPACE_ROOT,
+      env.GROK_PROJECT_DIR,
+      env.CLAUDE_PROJECT_DIR,
+      env.PWD
+    ) || fallbackCwd
+  );
+}
+
+/**
+ * Resolve hook event name from argv or stdin (Grok camelCase / Claude snake).
+ */
+export function resolveHookEventName(input = {}, argvEvent = "") {
+  return firstNonEmpty(argvEvent, input?.hookEventName, input?.hook_event_name) || "";
+}
+
+/**
+ * Resolve transcript path fields from dual-host envelopes.
+ */
+export function resolveHookTranscriptPathField(input = {}) {
+  return firstNonEmpty(input?.transcript_path, input?.transcriptPath, input?.transcript);
+}
+
 export function resolvePluginDataDir() {
   return firstDefinedEnv("GROK_PLUGIN_DATA", "CLAUDE_PLUGIN_DATA");
 }
