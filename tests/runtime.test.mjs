@@ -202,34 +202,49 @@ test("task runs without auth preflight so Codex can refresh an expired session",
   assert.match(result.stdout, /Handled the requested task/);
 });
 
-test("transfer delegates the current Claude session directly to native import", () => {
+function writeGrokChatHistory(home, repo, sessionId, entries) {
+  const group = encodeURIComponent(path.resolve(repo));
+  const sessionDir = path.join(home, ".grok", "sessions", group, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const sourcePath = path.join(sessionDir, "chat_history.jsonl");
+  fs.writeFileSync(sourcePath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+  return sourcePath;
+}
+
+function grokHomeEnv(home, binDir) {
+  return {
+    ...buildEnv(binDir),
+    HOME: home,
+    USERPROFILE: home,
+    GROK_HOME: path.join(home, ".grok"),
+    CODEX_HOME: path.join(home, ".codex")
+  };
+}
+
+test("transfer converts the current Grok session and imports it", () => {
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
   const sessionId = "sess-native-transfer";
   fs.mkdirSync(repo, { recursive: true });
-  const projectDir = path.join(home, ".claude", "projects", "-repo");
-  const sourcePath = path.join(projectDir, `${sessionId}.jsonl`);
-  fs.mkdirSync(projectDir, { recursive: true });
   installFakeCodex(binDir);
   initGitRepo(repo);
 
+  const sourcePath = writeGrokChatHistory(home, repo, sessionId, [
+    { type: "user", content: "Initial request" },
+    { type: "assistant", content: "Initial answer" },
+    { type: "user", content: "/codex:transfer" }
+  ]);
   fs.writeFileSync(
-    sourcePath,
-    [
-      { type: "custom-title", customTitle: "Native transfer" },
-      { type: "user", cwd: repo, message: { role: "user", content: "Initial request" } },
-      { type: "assistant", cwd: repo, message: { role: "assistant", content: "Initial answer" } },
-      { type: "user", cwd: repo, message: { role: "user", content: "/codex:transfer" } }
-    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    path.join(path.dirname(sourcePath), "summary.json"),
+    JSON.stringify({ generated_title: "Native transfer" }),
     "utf8"
   );
+
   const result = run("node", [SCRIPT, "transfer", "--json"], {
     cwd: repo,
     env: {
-      ...buildEnv(binDir),
-      HOME: home,
-      CODEX_HOME: path.join(home, ".codex"),
+      ...grokHomeEnv(home, binDir),
       CODEX_COMPANION_TRANSCRIPT_PATH: sourcePath
     }
   });
@@ -240,13 +255,15 @@ test("transfer delegates the current Claude session directly to native import", 
   assert.equal(payload.threadId, "thr_1");
   assert.equal(payload.resumeCommand, "codex resume thr_1");
   assert.equal(payload.sourcePath, canonicalSourcePath);
-  assert.equal(payload.sessionId, sessionId);
+  assert.equal(payload.host, "grok");
+  assert.equal(payload.converted, true);
 
   const fakeState = JSON.parse(fs.readFileSync(path.join(binDir, "fake-codex-state.json"), "utf8"));
   assert.equal(fakeState.threads.length, 1);
   assert.equal(fakeState.threads[0].ephemeral, false);
   assert.equal(fakeState.threads[0].name, "Native transfer");
-  assert.equal(fakeState.lastExternalAgentImport.sourcePath, canonicalSourcePath);
+  assert.ok(fakeState.lastExternalAgentImport.sourcePath);
+  assert.notEqual(fakeState.lastExternalAgentImport.sourcePath, canonicalSourcePath);
   assert.deepEqual(
     fakeState.threads[0].visibleMessages.map((message) => message.text),
     ["Initial request", "Initial answer", "/codex:transfer"]
@@ -257,29 +274,20 @@ test("transfer reports an actionable upgrade error when native import is unsuppo
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
-  const projectDir = path.join(home, ".claude", "projects", "-repo");
-  const sourcePath = path.join(projectDir, "session.jsonl");
   fs.mkdirSync(repo, { recursive: true });
-  fs.mkdirSync(projectDir, { recursive: true });
   installFakeCodex(binDir, "external-import-unsupported");
   initGitRepo(repo);
-  fs.writeFileSync(
-    sourcePath,
-    `${JSON.stringify({ type: "user", cwd: repo, message: { role: "user", content: "Continue this work." } })}\n`,
-    "utf8"
-  );
+  const sourcePath = writeGrokChatHistory(home, repo, "session-upgrade", [
+    { type: "user", content: "Continue this work." }
+  ]);
 
   const result = run("node", [SCRIPT, "transfer", "--source", sourcePath, "--json"], {
     cwd: repo,
-    env: {
-      ...buildEnv(binDir),
-      HOME: home,
-      CODEX_HOME: path.join(home, ".codex")
-    }
+    env: grokHomeEnv(home, binDir)
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /does not support Claude session transfer/);
+  assert.match(result.stderr, /does not support session transfer/);
   assert.match(result.stderr, /@openai\/codex@latest/);
 });
 
@@ -287,54 +295,44 @@ test("transfer fails visibly when native import completes without a ledger recor
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
-  const projectDir = path.join(home, ".claude", "projects", "-repo");
-  const sourcePath = path.join(projectDir, "session.jsonl");
   fs.mkdirSync(repo, { recursive: true });
-  fs.mkdirSync(projectDir, { recursive: true });
   installFakeCodex(binDir, "external-import-fails");
   initGitRepo(repo);
-  fs.writeFileSync(
-    sourcePath,
-    `${JSON.stringify({ type: "user", cwd: repo, message: { role: "user", content: "Do not lose this request." } })}\n`,
-    "utf8"
-  );
+  const sourcePath = writeGrokChatHistory(home, repo, "session-fail", [
+    { type: "user", content: "Do not lose this request." }
+  ]);
 
   const result = run("node", [SCRIPT, "transfer", "--source", sourcePath], {
     cwd: repo,
-    env: {
-      ...buildEnv(binDir),
-      HOME: home,
-      CODEX_HOME: path.join(home, ".codex")
-    }
+    env: grokHomeEnv(home, binDir)
   });
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /did not record an imported thread/);
 });
 
-test("transfer rejects sources outside Claude projects and Grok sessions directories", () => {
+test("transfer rejects sources outside Grok sessions directories", () => {
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
   const sourcePath = path.join(home, "session.jsonl");
   fs.mkdirSync(repo, { recursive: true });
-  fs.mkdirSync(path.join(home, ".claude", "projects"), { recursive: true });
   fs.mkdirSync(path.join(home, ".grok", "sessions"), { recursive: true });
   installFakeCodex(binDir);
   initGitRepo(repo);
   fs.writeFileSync(
     sourcePath,
-    `${JSON.stringify({ type: "user", cwd: repo, message: { role: "user", content: "Outside source." } })}\n`,
+    `${JSON.stringify({ type: "user", content: "Outside source." })}\n`,
     "utf8"
   );
 
   const result = run("node", [SCRIPT, "transfer", "--source", sourcePath], {
     cwd: repo,
-    env: { ...buildEnv(binDir), HOME: home, USERPROFILE: home, GROK_HOME: path.join(home, ".grok") }
+    env: grokHomeEnv(home, binDir)
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must live under|only from/i);
+  assert.match(result.stderr, /must live under|only from|Grok sessions/i);
 });
 
 test("task reports the actual Codex auth error when the run is rejected", () => {
@@ -690,13 +688,14 @@ test("session start hook exports the host session id, transcript path, and plugi
     cwd: repo,
     env: {
       ...process.env,
-      CLAUDE_ENV_FILE: envFile,
-      CLAUDE_PLUGIN_DATA: pluginDataDir
+      GROK_ENV_FILE: envFile,
+      GROK_PLUGIN_DATA: pluginDataDir,
+      GROK_PLUGIN_ROOT: PLUGIN_ROOT
     },
     input: JSON.stringify({
-      hook_event_name: "SessionStart",
-      session_id: "sess-current",
-      transcript_path: transcriptPath,
+      hookEventName: "session_start",
+      sessionId: "sess-current",
+      transcriptPath,
       cwd: repo
     })
   });
@@ -705,8 +704,8 @@ test("session start hook exports the host session id, transcript path, and plugi
   const exported = fs.readFileSync(envFile, "utf8");
   assert.match(exported, /export CODEX_COMPANION_SESSION_ID='sess-current'/);
   assert.match(exported, new RegExp(`export CODEX_COMPANION_TRANSCRIPT_PATH='${transcriptPath.replace(/\\/g, "\\\\")}'`));
-  assert.match(exported, /export CLAUDE_PLUGIN_DATA=/);
   assert.match(exported, /export GROK_PLUGIN_DATA=/);
+  assert.doesNotMatch(exported, /CLAUDE_PLUGIN_DATA/);
 });
 
 test("write task output focuses on the Codex result without generic follow-up hints", () => {
@@ -1906,7 +1905,7 @@ test("session end fully cleans up jobs for the ending session", async (t) => {
     },
     input: JSON.stringify({
       hook_event_name: "SessionEnd",
-      session_id: "sess-current",
+      sessionId: "sess-current",
       cwd: repo
     })
   });
@@ -1963,8 +1962,8 @@ test("stop hook runs a stop-time review task and blocks on findings when the rev
     env: buildEnv(binDir),
     input: JSON.stringify({
       cwd: repo,
-      session_id: "sess-stop-review",
-      last_assistant_message: "I completed the refactor and updated the retry logic."
+      sessionId: "sess-stop-review",
+      lastAssistantMessage: "I completed the refactor and updated the retry logic."
     })
   });
   assert.equal(blocked.status, 0, blocked.stderr);
@@ -1976,7 +1975,7 @@ test("stop hook runs a stop-time review task and blocks on findings when the rev
   const fakeState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
   assert.match(fakeState.lastTurnStart.prompt, /<task>/i);
   assert.match(fakeState.lastTurnStart.prompt, /<compact_output_contract>/i);
-  assert.match(fakeState.lastTurnStart.prompt, /Only review the work from the previous Claude turn/i);
+  assert.match(fakeState.lastTurnStart.prompt, /Only review the work from the previous Grok turn/i);
   assert.match(fakeState.lastTurnStart.prompt, /I completed the refactor and updated the retry logic\./);
 
   const status = run("node", [SCRIPT, "status"], {
@@ -2065,7 +2064,7 @@ test("stop hook allows the stop when the review gate is enabled and the stop-tim
   const allowed = run("node", [STOP_HOOK], {
     cwd: repo,
     env: buildEnv(binDir),
-    input: JSON.stringify({ cwd: repo, session_id: "sess-stop-clean" })
+    input: JSON.stringify({ cwd: repo, sessionId: "sess-stop-clean" })
   });
 
   assert.equal(allowed.status, 0, allowed.stderr);

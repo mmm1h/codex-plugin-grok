@@ -21,7 +21,6 @@ import { terminateProcessTree } from "./process.mjs";
 function loadPluginManifest() {
   const candidates = [
     new URL("../../.grok-plugin/plugin.json", import.meta.url),
-    new URL("../../.claude-plugin/plugin.json", import.meta.url),
     new URL("../../plugin.json", import.meta.url)
   ];
   for (const url of candidates) {
@@ -43,22 +42,7 @@ export const BROKER_ENDPOINT_ENV = "CODEX_COMPANION_APP_SERVER_ENDPOINT";
 export const BROKER_BUSY_RPC_CODE = -32001;
 
 function detectHostClientName() {
-  if (process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME || process.env.GROK_SESSION_ID) {
-    return "Grok";
-  }
-  if (process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR) {
-    return "Claude Code";
-  }
-  // Prefer Grok when a local Grok home exists; otherwise Claude Code.
-  try {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    if (home && fs.existsSync(path.join(home, ".grok"))) {
-      return "Grok";
-    }
-  } catch {
-    // ignore
-  }
-  return "Claude Code";
+  return "Grok";
 }
 
 /** @type {ClientInfo} */

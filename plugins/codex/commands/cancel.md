@@ -5,4 +5,4 @@ disable-model-invocation: true
 allowed-tools: run_terminal_command
 ---
 
-!`node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" cancel "$ARGUMENTS"`
+!`node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" cancel "$ARGUMENTS"`

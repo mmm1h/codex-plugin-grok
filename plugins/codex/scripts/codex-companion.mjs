@@ -70,7 +70,7 @@ const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const MODEL_ALIASES = new Map([["spark", "gpt-5.3-codex-spark"]]);
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
+const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Grok turn.";
 
 function printUsage() {
   console.log(
@@ -291,8 +291,8 @@ function isActiveJobStatus(status) {
   return status === "queued" || status === "running";
 }
 
-function getCurrentClaudeSessionId(env = process.env) {
-  // Dual-host: Grok always injects GROK_SESSION_ID; companion may also publish
+function getCurrentSessionId(env = process.env) {
+  // Grok always injects GROK_SESSION_ID; companion may also publish
   // CODEX_COMPANION_SESSION_ID when SessionStart can write an env file.
   return (
     env[SESSION_ID_ENV] ||
@@ -302,8 +302,13 @@ function getCurrentClaudeSessionId(env = process.env) {
   );
 }
 
+/** @deprecated Use getCurrentSessionId */
+function getCurrentClaudeSessionId(env = process.env) {
+  return getCurrentSessionId(env);
+}
+
 function filterJobsForCurrentClaudeSession(jobs) {
-  const sessionId = getCurrentClaudeSessionId();
+  const sessionId = getCurrentSessionId();
   if (!sessionId) {
     return jobs;
   }
@@ -548,7 +553,7 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
   if (!resumeLast && String(prompt ?? "").includes(STOP_REVIEW_TASK_MARKER)) {
     return {
       title: "Codex Stop Gate Review",
-      summary: "Stop-gate review of previous Claude turn"
+      summary: "Stop-gate review of previous Grok turn"
     };
   }
 
@@ -621,7 +626,7 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
 }
 
 function renderTransferResult(payload) {
-  const hostLabel = payload.host === "grok" ? "Grok" : payload.host === "claude" ? "Claude Code" : "host";
+  const hostLabel = payload.host === "grok" ? "Grok" : "host";
   const lines = [
     `Transferred the ${hostLabel} session into a Codex thread with visible turn history.`,
     `Codex session ID: ${payload.threadId}`,

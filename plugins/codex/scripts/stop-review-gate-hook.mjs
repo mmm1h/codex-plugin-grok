@@ -21,7 +21,7 @@ import {
 const STOP_REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, "..");
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
+const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Grok turn.";
 
 function readHookInput() {
   const raw = fs.readFileSync(0, "utf8").trim();
@@ -58,7 +58,6 @@ function buildStopReviewPrompt(input = {}) {
     : "";
   return interpolateTemplate(template, {
     HOST_RESPONSE_BLOCK: hostResponseBlock,
-    // Keep legacy placeholder for older templates.
     CLAUDE_RESPONSE_BLOCK: hostResponseBlock
   });
 }

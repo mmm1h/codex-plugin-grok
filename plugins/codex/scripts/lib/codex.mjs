@@ -44,25 +44,7 @@ import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from 
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
 
-function detectServiceName() {
-  if (process.env.GROK_PLUGIN_ROOT || process.env.GROK_HOME || process.env.GROK_SESSION_ID) {
-    return "grok_codex_plugin";
-  }
-  if (process.env.CLAUDE_PLUGIN_ROOT || process.env.CLAUDE_PROJECT_DIR) {
-    return "claude_code_codex_plugin";
-  }
-  try {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    if (home && fs.existsSync(path.join(home, ".grok"))) {
-      return "grok_codex_plugin";
-    }
-  } catch {
-    // ignore
-  }
-  return "claude_code_codex_plugin";
-}
-
-const SERVICE_NAME = detectServiceName();
+const SERVICE_NAME = "grok_codex_plugin";
 const TASK_THREAD_PREFIX = "Codex Companion Task";
 const DEFAULT_CONTINUE_PROMPT =
   "Continue from the current thread state. Pick the next highest-value step and follow through until the task is resolved.";
@@ -735,7 +717,7 @@ async function requestExternalAgentSessionImport(client, params) {
     previousHandler?.(message);
   });
   timeout = setTimeout(() => {
-    rejectCompleted(new Error("Timed out waiting for Codex to finish importing the Claude session."));
+    rejectCompleted(new Error("Timed out waiting for Codex to finish importing the Grok session."));
   }, EXTERNAL_AGENT_IMPORT_TIMEOUT_MS);
 
   try {
@@ -927,7 +909,7 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
     return {
       mode: "shared",
       label: "shared session",
-      detail: "This Claude session is configured to reuse one shared Codex runtime.",
+      detail: "This Grok session is configured to reuse one shared Codex runtime.",
       endpoint
     };
   }
@@ -1089,7 +1071,7 @@ export async function importExternalAgentSession(cwd, options = {}) {
     } catch (error) {
       if (error?.rpcCode === -32601) {
         throw new Error(
-          "This Codex version does not support Claude session transfer. Update Codex with `npm install -g @openai/codex@latest`, then retry.",
+          "This Codex version does not support session transfer. Update Codex with `npm install -g @openai/codex@latest`, then retry.",
           { cause: error }
         );
       }

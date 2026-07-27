@@ -3,44 +3,42 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Dual-host helpers for Grok Build and Claude Code.
- * Grok documents GROK_PLUGIN_ROOT / GROK_PLUGIN_DATA and also sets the
- * CLAUDE_PLUGIN_* aliases. Prefer Grok names, fall back to Claude names.
+ * Grok Build host helpers.
+ * This fork targets Grok only; Claude Code users should use openai/codex-plugin-cc.
  */
 
-/** Shell-style dual-host plugin root used in hooks.json command strings. */
-export const DUAL_HOST_PLUGIN_ROOT_EXPR = "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}";
+/** Plugin root expression used in hooks.json command strings. */
+export const GROK_PLUGIN_ROOT_EXPR = "${GROK_PLUGIN_ROOT}";
 
 /**
- * Expand a dual-host plugin-root expression the same way Grok/Claude hook
- * runners do for `${VAR}` / `${VAR:-default}` forms. Used by tests and by
- * helpers that need to resolve hook command templates without a shell.
+ * Expand `${VAR}` / `$VAR` / `${VAR:-default}` the same way Grok hook runners do.
  */
 export function expandPluginRootExpression(expression, env = process.env) {
   const source = String(expression ?? "");
-  return source.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, braced, fallback, bare) => {
-    const name = braced || bare;
-    const value = env[name];
-    if (value != null && String(value).trim() !== "") {
-      return String(value);
-    }
-    if (braced && fallback != null) {
-      // Fallback may itself be $OTHER or ${OTHER}
-      if (fallback.startsWith("${") || fallback.startsWith("$")) {
-        return expandPluginRootExpression(fallback, env);
+  return source.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (match, braced, fallback, bare) => {
+      const name = braced || bare;
+      const value = env[name];
+      if (value != null && String(value).trim() !== "") {
+        return String(value);
       }
-      return fallback;
+      if (braced && fallback != null) {
+        if (fallback.startsWith("${") || fallback.startsWith("$")) {
+          return expandPluginRootExpression(fallback, env);
+        }
+        return fallback;
+      }
+      return "";
     }
-    return "";
-  });
+  );
 }
 
 /**
- * Resolve the absolute path to a plugin script for hook invocation.
- * Prefers GROK_PLUGIN_ROOT, then CLAUDE_PLUGIN_ROOT.
+ * Resolve the absolute path to a plugin script under GROK_PLUGIN_ROOT.
  */
 export function resolvePluginScriptPath(relativeScriptPath, env = process.env) {
-  const root = firstDefinedEnvFrom(env, "GROK_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT");
+  const root = firstDefinedEnvFrom(env, "GROK_PLUGIN_ROOT");
   if (!root) {
     return null;
   }
@@ -63,13 +61,13 @@ export function firstDefinedEnv(...names) {
 }
 
 export function resolvePluginRoot() {
-  return firstDefinedEnv("GROK_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT");
+  return firstDefinedEnv("GROK_PLUGIN_ROOT");
 }
 
 /**
  * Companion jobs are scoped by CODEX_COMPANION_SESSION_ID when SessionStart can
- * export it. On Grok, GROK_SESSION_ID is always injected into hook/agent
- * processes and is the reliable fallback when GROK_ENV_FILE is absent.
+ * export it. GROK_SESSION_ID is always injected into hook/agent processes and is
+ * the reliable fallback when GROK_ENV_FILE is absent.
  */
 export const COMPANION_SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
 
@@ -87,13 +85,12 @@ function firstNonEmpty(...values) {
 }
 
 /**
- * Resolve the host session id from a hook stdin envelope and/or process env.
- * Accepts Grok camelCase (sessionId) and Claude snake_case (session_id).
+ * Resolve the Grok session id from a hook stdin envelope and/or process env.
+ * Primary: sessionId (Grok camelCase), GROK_SESSION_ID.
  */
 export function resolveHostSessionId(input = {}, env = process.env) {
   return firstNonEmpty(
     input?.sessionId,
-    input?.session_id,
     env.GROK_SESSION_ID,
     env[COMPANION_SESSION_ID_ENV],
     env.CODEX_COMPANION_SESSION_ID
@@ -101,75 +98,58 @@ export function resolveHostSessionId(input = {}, env = process.env) {
 }
 
 /**
- * Resolve the last assistant message for Stop/SubagentStop gates.
- * Grok: lastAssistantMessage; Claude: last_assistant_message.
+ * Resolve the last assistant message for Stop/SubagentStop gates (Grok camelCase).
  */
 export function resolveLastAssistantMessage(input = {}) {
-  return firstNonEmpty(input?.lastAssistantMessage, input?.last_assistant_message) || "";
+  return firstNonEmpty(input?.lastAssistantMessage) || "";
 }
 
 /**
- * Resolve workspace cwd from a hook envelope.
+ * Resolve workspace cwd from a Grok hook envelope.
  */
 export function resolveHookCwd(input = {}, env = process.env, fallbackCwd = process.cwd()) {
   return (
     firstNonEmpty(
       input?.cwd,
       input?.workspaceRoot,
-      input?.workspace_root,
       env.GROK_WORKSPACE_ROOT,
       env.GROK_PROJECT_DIR,
-      env.CLAUDE_PROJECT_DIR,
       env.PWD
     ) || fallbackCwd
   );
 }
 
 /**
- * Resolve hook event name from argv or stdin (Grok camelCase / Claude snake).
+ * Resolve hook event name from argv or Grok stdin (camelCase).
  */
 export function resolveHookEventName(input = {}, argvEvent = "") {
-  return firstNonEmpty(argvEvent, input?.hookEventName, input?.hook_event_name) || "";
+  return firstNonEmpty(argvEvent, input?.hookEventName) || "";
 }
 
 /**
- * Resolve transcript path fields from dual-host envelopes.
+ * Resolve transcript path fields from Grok envelopes.
  */
 export function resolveHookTranscriptPathField(input = {}) {
-  return firstNonEmpty(input?.transcript_path, input?.transcriptPath, input?.transcript);
+  return firstNonEmpty(input?.transcriptPath, input?.transcript, input?.transcript_path);
 }
 
 export function resolvePluginDataDir() {
-  return firstDefinedEnv("GROK_PLUGIN_DATA", "CLAUDE_PLUGIN_DATA");
+  return firstDefinedEnv("GROK_PLUGIN_DATA");
 }
 
 export function resolveProjectDir(fallbackCwd) {
-  return (
-    firstDefinedEnv("GROK_PROJECT_DIR", "CLAUDE_PROJECT_DIR", "PWD") ||
-    fallbackCwd ||
-    process.cwd()
-  );
+  return firstDefinedEnv("GROK_PROJECT_DIR", "GROK_WORKSPACE_ROOT", "PWD") || fallbackCwd || process.cwd();
 }
 
 export function resolveHostEnvFile() {
-  return firstDefinedEnv("GROK_ENV_FILE", "CLAUDE_ENV_FILE");
+  return firstDefinedEnv("GROK_ENV_FILE");
 }
 
 export function resolveHostName() {
-  if (firstDefinedEnv("GROK_PLUGIN_ROOT", "GROK_HOME", "GROK_SESSION_ID")) {
-    return "Grok";
-  }
-  if (firstDefinedEnv("CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR")) {
-    return "Claude Code";
-  }
-  if (fs.existsSync(path.join(os.homedir(), ".grok"))) {
-    return "Grok";
-  }
-  return "Claude Code";
+  return "Grok";
 }
 
 export function resolveUserHome() {
-  // Prefer HOME so tests (and Unix) can isolate; then USERPROFILE (Windows); then os.homedir().
   return firstDefinedEnv("HOME", "USERPROFILE") || os.homedir();
 }
 
@@ -177,17 +157,12 @@ export function resolveGrokHome() {
   return firstDefinedEnv("GROK_HOME") || path.join(resolveUserHome(), ".grok");
 }
 
-export function resolveClaudeHome() {
-  return path.join(resolveUserHome(), ".claude");
-}
-
 export function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
 
 /**
- * Export env vars into the host session env file when supported.
- * Grok may not always provide GROK_ENV_FILE; Claude uses CLAUDE_ENV_FILE.
+ * Export env vars into the host session env file when GROK_ENV_FILE is set.
  */
 export function appendHostEnvVar(name, value) {
   const envFile = resolveHostEnvFile();
@@ -199,12 +174,11 @@ export function appendHostEnvVar(name, value) {
 }
 
 /**
- * Resolve plugin.json for either Grok or Claude layout.
+ * Resolve plugin.json for the Grok plugin layout.
  */
 export function resolvePluginManifestUrl(importMetaUrl) {
   const candidates = [
     new URL("../../.grok-plugin/plugin.json", importMetaUrl),
-    new URL("../../.claude-plugin/plugin.json", importMetaUrl),
     new URL("../../plugin.json", importMetaUrl)
   ];
   for (const url of candidates) {
@@ -217,10 +191,12 @@ export function resolvePluginManifestUrl(importMetaUrl) {
       // keep looking
     }
   }
-  return { url: candidates[1], path: null };
+  return { url: candidates[0], path: null };
 }
 
 function fileURLToPathCompat(url) {
-  // Node always has fileURLToPath; local helper avoids circular imports.
   return decodeURIComponent(String(url).replace(/^file:\/\//, "").replace(/^\/([A-Za-z]:)/, "$1"));
 }
+
+/** @deprecated Use GROK_PLUGIN_ROOT_EXPR */
+export const DUAL_HOST_PLUGIN_ROOT_EXPR = GROK_PLUGIN_ROOT_EXPR;

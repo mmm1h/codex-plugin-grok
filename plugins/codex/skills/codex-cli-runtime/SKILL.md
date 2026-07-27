@@ -10,7 +10,6 @@ Use this skill only inside the `codex:codex-rescue` subagent.
 
 Primary helper:
 - `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<raw arguments>"`
-- Fallback if only Claude-compatible env is present: `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<raw arguments>"`
 
 Execution rules:
 - The rescue subagent is a forwarder, not an orchestrator. Its only job is to invoke `task` once and return that stdout unchanged.

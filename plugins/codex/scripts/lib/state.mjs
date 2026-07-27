@@ -12,7 +12,7 @@ const JOBS_DIR_NAME = "jobs";
 const MAX_JOBS = 50;
 
 function resolvePluginDataDir() {
-  return process.env.GROK_PLUGIN_DATA || process.env.CLAUDE_PLUGIN_DATA || null;
+  return process.env.GROK_PLUGIN_DATA || null;
 }
 
 function nowIso() {

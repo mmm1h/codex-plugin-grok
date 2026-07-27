@@ -1,8 +1,8 @@
 # Codex plugin for Grok Build
 
-Fork of [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc), adapted so **Grok Build** can call local Codex for code review and task delegation.
+Fork of [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc), rewritten for **Grok Build** only.
 
-This plugin is for Grok users who want Codex as a second pair of hands without leaving the Grok workflow. Claude Code paths still work as a fallback.
+This plugin is for Grok users who want Codex as a second pair of hands without leaving the Grok workflow. Claude Code users should install the official [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) instead.
 
 ## What You Get
 
@@ -16,7 +16,7 @@ This plugin is for Grok users who want Codex as a second pair of hands without l
 - **ChatGPT subscription (incl. Free) or OpenAI API key** (or your existing Codex provider profile, e.g. a configured `codex-api` profile)
   - Usage contributes to your Codex usage limits. [Learn more](https://developers.openai.com/codex/pricing).
 - **Node.js 18.18 or later**
-- **Grok Build** (or Claude Code as secondary host)
+- **Grok Build**
 - Local `codex` CLI (`npm install -g @openai/codex`)
 
 ## Install in Grok

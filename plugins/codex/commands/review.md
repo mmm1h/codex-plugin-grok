@@ -42,7 +42,7 @@ Argument handling:
 Foreground flow:
 - Run:
 ```bash
-node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" review "$ARGUMENTS"
+node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" review "$ARGUMENTS"
 ```
 - Return the command stdout verbatim, exactly as-is.
 - Do not paraphrase, summarize, or add commentary before or after it.
@@ -52,7 +52,7 @@ Background flow:
 - Launch the review with `run_terminal_command` in the background:
 ```
 run_terminal_command({
-  command: `node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" review "$ARGUMENTS"`,
+  command: `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" review "$ARGUMENTS"`,
   description: "Codex review",
   background: true
 })

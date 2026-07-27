@@ -5,7 +5,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobFile, resolveJobLogFile, resolveStateDir, resolveStateFile, saveState } from "../plugins/codex/scripts/lib/state.mjs";
+import {
+  resolveJobFile,
+  resolveJobLogFile,
+  resolveStateDir,
+  resolveStateFile,
+  saveState
+} from "../plugins/codex/scripts/lib/state.mjs";
 
 test("resolveStateDir uses a temp-backed per-workspace directory", () => {
   const workspace = makeTempDir();
@@ -16,54 +22,23 @@ test("resolveStateDir uses a temp-backed per-workspace directory", () => {
   assert.match(stateDir, new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 });
 
-test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
+test("resolveStateDir uses GROK_PLUGIN_DATA when it is provided", () => {
   const workspace = makeTempDir();
   const pluginDataDir = makeTempDir();
-  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-  const previousGrokPluginDataDir = process.env.GROK_PLUGIN_DATA;
-  delete process.env.GROK_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const previousPluginDataDir = process.env.GROK_PLUGIN_DATA;
+  process.env.GROK_PLUGIN_DATA = pluginDataDir;
 
   try {
     const stateDir = resolveStateDir(workspace);
 
     assert.equal(stateDir.startsWith(path.join(pluginDataDir, "state")), true);
     assert.match(path.basename(stateDir), /.+-[a-f0-9]{16}$/);
-    assert.match(
-      stateDir,
-      new RegExp(`^${path.join(pluginDataDir, "state").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
-    );
   } finally {
     if (previousPluginDataDir == null) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
-    } else {
-      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
-    }
-    if (previousGrokPluginDataDir == null) {
       delete process.env.GROK_PLUGIN_DATA;
     } else {
-      process.env.GROK_PLUGIN_DATA = previousGrokPluginDataDir;
+      process.env.GROK_PLUGIN_DATA = previousPluginDataDir;
     }
-  }
-});
-
-test("resolveStateDir prefers GROK_PLUGIN_DATA over CLAUDE_PLUGIN_DATA", () => {
-  const workspace = makeTempDir();
-  const grokData = makeTempDir();
-  const claudeData = makeTempDir();
-  const previousGrok = process.env.GROK_PLUGIN_DATA;
-  const previousClaude = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.GROK_PLUGIN_DATA = grokData;
-  process.env.CLAUDE_PLUGIN_DATA = claudeData;
-
-  try {
-    const stateDir = resolveStateDir(workspace);
-    assert.equal(stateDir.startsWith(path.join(grokData, "state")), true);
-  } finally {
-    if (previousGrok == null) delete process.env.GROK_PLUGIN_DATA;
-    else process.env.GROK_PLUGIN_DATA = previousGrok;
-    if (previousClaude == null) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = previousClaude;
   }
 });
 
@@ -109,7 +84,6 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
   });
 
   const prunedJobFile = resolveJobFile(workspace, "job-0");
-  const prunedLogFile = resolveJobLogFile(workspace, "job-0");
   const retainedJobFile = resolveJobFile(workspace, "job-50");
   const retainedLogFile = resolveJobLogFile(workspace, "job-50");
   const jobsDir = path.dirname(prunedJobFile);

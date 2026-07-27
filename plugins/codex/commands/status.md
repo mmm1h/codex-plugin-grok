@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: run_terminal_command
 ---
 
-!`node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" status "$ARGUMENTS"`
+!`node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" status "$ARGUMENTS"`
 
 If the user did not pass a job ID:
 - Render the command output as a single Markdown table for the current and past runs in this session.

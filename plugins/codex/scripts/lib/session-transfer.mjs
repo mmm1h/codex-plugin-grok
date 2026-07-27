@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ensureAbsolutePath } from "./fs.mjs";
-import { resolveGrokHome, resolveClaudeHome } from "./host-env.mjs";
+import { resolveGrokHome } from "./host-env.mjs";
 
 export const TRANSCRIPT_PATH_ENV = "CODEX_COMPANION_TRANSCRIPT_PATH";
 
@@ -26,7 +26,6 @@ function isInsideDir(parentDir, candidatePath) {
 }
 
 function encodeGrokSessionGroup(cwd) {
-  // Grok stores sessions under URL-encoded cwd names (Windows backslashes included).
   return encodeURIComponent(path.resolve(cwd));
 }
 
@@ -58,7 +57,6 @@ function extractTextContent(content) {
           if (typeof part.content === "string") {
             return part.content;
           }
-          // tool_use / function-call style parts embedded in content arrays
           if (part.type === "tool_use" || part.type === "tool_call" || part.name) {
             const name = part.name || part.tool_name || "tool";
             const input = part.input ?? part.arguments ?? part.args;
@@ -77,7 +75,6 @@ function extractTextContent(content) {
     if (typeof content.text === "string") {
       return content.text.trim();
     }
-    // Structured tool result objects
     try {
       return truncateText(JSON.stringify(content));
     } catch {
@@ -132,11 +129,8 @@ function pushTurn(out, type, cwd, text) {
 }
 
 /**
- * Convert a Grok session chat_history.jsonl into Claude-style JSONL that
- * Codex externalAgentConfig/import can consume.
- *
- * Preserves user turns, assistant text, tool_call summaries on assistant
- * turns, and tool_result substance as user turns. Drops system/reasoning noise.
+ * Convert a Grok session chat_history.jsonl into JSONL that Codex
+ * externalAgentConfig/import can consume (Claude-compatible turn shape).
  */
 export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
   const raw = fs.readFileSync(sourcePath, "utf8");
@@ -164,7 +158,6 @@ export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
 
     if (type === "user") {
       const text = extractTextContent(entry.content ?? entry.message?.content ?? entry.text);
-      // Skip pure synthetic system-reminder blobs unless they carry a real user_query
       if (!text) {
         continue;
       }
@@ -185,7 +178,6 @@ export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
       continue;
     }
 
-    // Some hosts nest tool results under role=tool
     if (type === "tool_use" || type === "function_call") {
       pushTurn(out, "assistant", cwd, formatToolCalls([entry]));
     }
@@ -216,18 +208,6 @@ function materializeGrokImportSource(sourcePath, cwd, cacheDir) {
   return outPath;
 }
 
-function resolveClaudeSessionPathStrict(sourcePath) {
-  const projects = fs.realpathSync(path.join(resolveClaudeHome(), "projects"));
-  const source = fs.realpathSync(sourcePath);
-  if (!isInsideDir(projects, source)) {
-    throw new Error(`Codex can import Claude sessions only from ${projects}: ${source}`);
-  }
-  if (path.extname(source) !== ".jsonl") {
-    throw new Error(`Claude session source must be a JSONL file: ${source}`);
-  }
-  return source;
-}
-
 function resolveGrokSessionPathStrict(sourcePath) {
   const sessionsRoot = fs.realpathSync(path.join(resolveGrokHome(), "sessions"));
   const source = fs.realpathSync(sourcePath);
@@ -254,19 +234,21 @@ function autoResolveGrokTranscript(cwd, sessionId) {
 }
 
 /**
- * Resolve a host session transcript for transfer into Codex.
- * Returns { sourcePath, host, importPath } where importPath is what Codex should import
- * (may be a converted temp Claude-format JSONL for Grok sessions).
+ * Resolve a Grok session transcript for transfer into Codex.
+ * Returns { sourcePath, host, importPath } where importPath is the converted JSONL.
  */
 export function resolveSessionTransferSource(cwd, options = {}) {
   const requestedPath =
     options.source ||
     process.env[TRANSCRIPT_PATH_ENV] ||
-    autoResolveGrokTranscript(cwd, options.sessionId || process.env.CODEX_COMPANION_SESSION_ID || process.env.GROK_SESSION_ID);
+    autoResolveGrokTranscript(
+      cwd,
+      options.sessionId || process.env.CODEX_COMPANION_SESSION_ID || process.env.GROK_SESSION_ID
+    );
 
   if (!requestedPath) {
     throw new Error(
-      "Could not identify the current host transcript. Retry with --source <path-to-session-jsonl>."
+      "Could not identify the current Grok transcript. Retry with --source <path-to-chat_history.jsonl>."
     );
   }
 
@@ -276,62 +258,33 @@ export function resolveSessionTransferSource(cwd, options = {}) {
   }
 
   const realSource = fs.realpathSync(sourcePath);
-  const claudeProjects = path.join(resolveClaudeHome(), "projects");
   const grokSessions = path.join(resolveGrokHome(), "sessions");
 
-  // Claude native path
-  if (fs.existsSync(claudeProjects)) {
-    try {
-      const projectsReal = fs.realpathSync(claudeProjects);
-      if (isInsideDir(projectsReal, realSource)) {
-        const resolved = resolveClaudeSessionPathStrict(realSource);
-        return {
-          host: "claude",
-          sourcePath: resolved,
-          importPath: resolved,
-          converted: false
-        };
-      }
-    } catch {
-      // fall through
-    }
+  if (!fs.existsSync(grokSessions)) {
+    throw new Error(`Grok sessions directory not found: ${grokSessions}`);
   }
 
-  // Grok session path (chat_history.jsonl under ~/.grok/sessions)
-  if (fs.existsSync(grokSessions)) {
-    try {
-      const sessionsReal = fs.realpathSync(grokSessions);
-      if (isInsideDir(sessionsReal, realSource)) {
-        const resolved = resolveGrokSessionPathStrict(realSource);
-        const cacheDir = path.join(
-          process.env.GROK_PLUGIN_DATA || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir(),
-          "codex-companion",
-          "transfer-cache"
-        );
-        const importPath = materializeGrokImportSource(resolved, cwd, cacheDir);
-        return {
-          host: "grok",
-          sourcePath: resolved,
-          importPath,
-          converted: true
-        };
-      }
-    } catch (error) {
-      throw error;
-    }
+  const sessionsReal = fs.realpathSync(grokSessions);
+  if (!isInsideDir(sessionsReal, realSource)) {
+    throw new Error(`Session source must live under ${grokSessions}: ${realSource}`);
   }
 
-  throw new Error(
-    `Session source must live under ${claudeProjects} (Claude) or ${grokSessions} (Grok): ${realSource}`
+  const resolved = resolveGrokSessionPathStrict(realSource);
+  const cacheDir = path.join(
+    process.env.GROK_PLUGIN_DATA || os.tmpdir(),
+    "codex-companion",
+    "transfer-cache"
   );
+  const importPath = materializeGrokImportSource(resolved, cwd, cacheDir);
+  return {
+    host: "grok",
+    sourcePath: resolved,
+    importPath,
+    converted: true
+  };
 }
 
-/** @deprecated Prefer resolveSessionTransferSource. Kept for callers/tests that only need Claude. */
+/** @deprecated Prefer resolveSessionTransferSource. */
 export function resolveClaudeSessionPath(cwd, options = {}) {
-  const result = resolveSessionTransferSource(cwd, options);
-  if (result.host !== "claude") {
-    // For pure Claude callers, return import path only when it is Claude-native.
-    // Grok conversion still returns a usable path, so allow it.
-  }
-  return result.importPath;
+  return resolveSessionTransferSource(cwd, options).importPath;
 }

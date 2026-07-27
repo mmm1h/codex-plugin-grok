@@ -112,9 +112,7 @@ export function handleSessionStart(input, env = process.env) {
     appendHostEnvVar(TRANSCRIPT_PATH_ENV, transcriptPath);
   }
   if (pluginData) {
-    // Export both names so downstream scripts work on either host.
     appendHostEnvVar("GROK_PLUGIN_DATA", pluginData);
-    appendHostEnvVar("CLAUDE_PLUGIN_DATA", pluginData);
   }
   return { sessionId, transcriptPath, pluginData };
 }

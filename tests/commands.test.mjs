@@ -86,7 +86,7 @@ test("rescue command absorbs continue semantics for Grok", () => {
   assert.match(rescue, /default to foreground/i);
   assert.match(rescue, /Do not forward them to `task`/i);
   assert.match(agent, /run_terminal_command/);
-  assert.match(agent, /GROK_PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT/);
+  assert.match(agent, /GROK_PLUGIN_ROOT/);
   assert.match(agent, /thin forwarding wrapper/i);
   assert.match(agent, /--resume/);
   assert.match(agent, /--fresh/);
@@ -148,11 +148,8 @@ test("hooks keep session-end cleanup and stop gating enabled", () => {
   assert.match(source, /SessionEnd/);
   assert.match(source, /stop-review-gate-hook\.mjs/);
   assert.match(source, /session-lifecycle-hook\.mjs/);
-  // Dual-host: prefer Grok root, fall back to Claude (not Claude-only).
-  assert.match(source, /GROK_PLUGIN_ROOT/);
-  assert.match(source, /CLAUDE_PLUGIN_ROOT/);
-  assert.match(source, /\$\{GROK_PLUGIN_ROOT:-\$CLAUDE_PLUGIN_ROOT\}/);
-  assert.doesNotMatch(source, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\//);
+  assert.match(source, /\$\{GROK_PLUGIN_ROOT\}/);
+  assert.doesNotMatch(source, /CLAUDE_PLUGIN_ROOT/);
 });
 
 test("shipped docs avoid machine-local absolute user paths", () => {
@@ -177,11 +174,11 @@ test("setup command can offer Codex install and still points users to codex logi
   assert.match(readme, /\/codex:setup --disable-review-gate/);
 });
 
-test("marketplace dual manifests exist for Grok and Claude", () => {
+test("marketplace Grok manifest exists (no Claude dual-host)", () => {
   assert.equal(fs.existsSync(path.join(ROOT, ".grok-plugin", "marketplace.json")), true);
-  assert.equal(fs.existsSync(path.join(ROOT, ".claude-plugin", "marketplace.json")), true);
+  assert.equal(fs.existsSync(path.join(ROOT, ".claude-plugin", "marketplace.json")), false);
   assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".grok-plugin", "plugin.json")), true);
-  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".claude-plugin", "plugin.json")), true);
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".claude-plugin", "plugin.json")), false);
   const marketplace = JSON.parse(fs.readFileSync(path.join(ROOT, ".grok-plugin", "marketplace.json"), "utf8"));
   assert.equal(marketplace.plugins[0].name, "codex");
   assert.match(marketplace.metadata.version, /grok/i);

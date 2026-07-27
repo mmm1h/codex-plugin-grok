@@ -2,18 +2,13 @@
 
 ## 1.1.0-grok
 
-- Fork target: Grok Build first-class support (based on openai/codex-plugin-cc 1.0.6)
-- Dual marketplace manifests: `.grok-plugin/` and `.claude-plugin/`
-- Host env dual-read: `GROK_PLUGIN_*` preferred, `CLAUDE_PLUGIN_*` fallback
-- Hooks use `${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}` so Grok-only env resolves SessionStart/End/Stop
-- Hook envelopes accept Grok camelCase (`sessionId`, `lastAssistantMessage`, `hookEventName`) and Claude snake_case
-- Session scoping falls back to always-injected `GROK_SESSION_ID` when companion env-file export is unavailable
-- Commands/agents rewritten for Grok tools (`run_terminal_command`, `spawn_subagent`, `ask_user_question`)
-- Session transfer supports Grok `~/.grok/sessions/**/chat_history.jsonl` (auto-converts to Codex import format)
-- Grok transfer retains user/assistant text plus tool_call and tool_result summaries (drops pure reasoning)
-- Claude session transfer still works under `~/.claude/projects`
-- App-server client name / service name report Grok when running under Grok
-- Portable install docs (no machine-local absolute paths)
+- Grok-only fork of openai/codex-plugin-cc (Claude Code users should use the official plugin)
+- Marketplace manifest: `.grok-plugin/` only
+- Host env: `GROK_PLUGIN_*` / `GROK_SESSION_ID` / Grok camelCase hook envelopes
+- Hooks use `${GROK_PLUGIN_ROOT}` for SessionStart/End/Stop
+- Commands/agents use Grok tools (`run_terminal_command`, `spawn_subagent`, `ask_user_question`)
+- Session transfer for `~/.grok/sessions/**/chat_history.jsonl` (keeps tool_call / tool_result substance)
+- App-server client name: `Grok`; service name: `grok_codex_plugin`
 
 ## 1.0.0
 

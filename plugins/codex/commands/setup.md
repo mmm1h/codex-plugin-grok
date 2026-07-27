@@ -7,7 +7,7 @@ allowed-tools: run_terminal_command, ask_user_question
 Run:
 
 ```bash
-node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" setup --json $ARGUMENTS
+node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" setup --json $ARGUMENTS
 ```
 
 If the result says Codex is unavailable and npm is available:
@@ -25,7 +25,7 @@ npm install -g @openai/codex
 - Then rerun:
 
 ```bash
-node "${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" setup --json $ARGUMENTS
+node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" setup --json $ARGUMENTS
 ```
 
 If Codex is already installed or npm is unavailable:
