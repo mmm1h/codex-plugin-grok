@@ -248,7 +248,7 @@ pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -PromptFile <repo
 pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "review" -Profile codex-api
 ```
 
-The helper uses Codex's default configuration unless `-Profile` is supplied. It prefers the npm `codex.cmd` shim on Windows so PowerShell execution policy does not block `codex.ps1`.
+The helper preserves Codex's configured reasoning effort unless `-Effort` is supplied explicitly. `-Profile` (an alias for `-CodexProfile`) adds the named profile only when supplied. It prefers the npm `codex.cmd` shim on Windows so PowerShell execution policy does not block `codex.ps1`.
 
 Or pipe manually:
 

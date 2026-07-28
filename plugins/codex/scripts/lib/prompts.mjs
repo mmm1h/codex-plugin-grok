@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Grok turn.";
+
 export function loadPromptTemplate(rootDir, name) {
   const promptPath = path.join(rootDir, "prompts", `${name}.md`);
   return fs.readFileSync(promptPath, "utf8");

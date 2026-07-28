@@ -25,7 +25,11 @@ import { resolveSessionTransferSource } from "./lib/session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
-import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
+import {
+  STOP_REVIEW_TASK_MARKER,
+  loadPromptTemplate,
+  interpolateTemplate
+} from "./lib/prompts.mjs";
 import {
   generateJobId,
   getConfig,
@@ -69,19 +73,28 @@ const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
-const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_REASONING_EFFORTS = new Set([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra"
+]);
 const MODEL_ALIASES = new Map([["spark", "gpt-5.3-codex-spark"]]);
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Grok turn.";
 
 function printUsage() {
   console.log(
     [
       "Usage:",
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
-      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]  (host controls accepted; direct CLI stays foreground)",
+      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]  (host controls accepted; direct CLI stays foreground)",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [prompt]",
       "  node scripts/codex-companion.mjs transfer [--source <session-jsonl>] [--json]",
+      "  node scripts/codex-companion.mjs task-resume-candidate [--json]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
@@ -122,7 +135,7 @@ function normalizeReasoningEffort(effort) {
   }
   if (!VALID_REASONING_EFFORTS.has(normalized)) {
     throw new Error(
-      `Unsupported reasoning effort "${effort}". Use one of: none, minimal, low, medium, high, xhigh.`
+      `Unsupported reasoning effort "${effort}". Use one of: ${[...VALID_REASONING_EFFORTS].join(", ")}.`
     );
   }
   return normalized;
@@ -730,6 +743,8 @@ function enqueueBackgroundTask(cwd, job, request) {
 }
 
 async function handleReviewCommand(argv, config) {
+  // Host command templates own waiting/background execution; keep both flags declared
+  // so parseArgs does not leak them into review focus text.
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "background", "wait"],

@@ -779,7 +779,7 @@ test("task --fresh is treated as routing control and does not leak into the prom
   assert.equal(fakeState.lastTurnStart.prompt, "diagnose the flaky test");
 });
 
-test("task forwards model selection and reasoning effort to app-server turn/start", () => {
+test("task accepts every supported reasoning effort, forwards it, and rejects unknown values", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -789,15 +789,30 @@ test("task forwards model selection and reasoning effort to app-server turn/star
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
 
-  const result = run("node", [SCRIPT, "task", "--model", "spark", "--effort", "low", "diagnose the failing test"], {
+  const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+  for (const effort of efforts) {
+    const result = run(
+      "node",
+      [SCRIPT, "task", "--model", "spark", "--effort", effort, "diagnose the failing test"],
+      {
+        cwd: repo,
+        env: buildEnv(binDir)
+      }
+    );
+
+    assert.equal(result.status, 0, `${effort}: ${result.stderr}`);
+    const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    assert.equal(fakeState.lastTurnStart.model, "gpt-5.3-codex-spark");
+    assert.equal(fakeState.lastTurnStart.effort, effort);
+  }
+
+  const invalid = run("node", [SCRIPT, "task", "--effort", "extreme", "diagnose the failing test"], {
     cwd: repo,
     env: buildEnv(binDir)
   });
-
-  assert.equal(result.status, 0, result.stderr);
-  const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastTurnStart.model, "gpt-5.3-codex-spark");
-  assert.equal(fakeState.lastTurnStart.effort, "low");
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr, /Unsupported reasoning effort "extreme"/);
+  assert.match(invalid.stderr, /none, minimal, low, medium, high, xhigh, max, ultra/);
 });
 
 test("task logs reasoning summaries and assistant messages to the job log", () => {
@@ -1076,6 +1091,21 @@ test("review accepts --background while still running as a tracked review job", 
   assert.match(status.stdout, /# Codex Status/);
   assert.match(status.stdout, /Codex Review/);
   assert.match(status.stdout, /completed/);
+
+  const challenged = run(
+    "node",
+    [SCRIPT, "adversarial-review", "--background", "challenge retry boundaries", "--json"],
+    {
+      cwd: repo,
+      env: buildEnv(binDir)
+    }
+  );
+
+  assert.equal(challenged.status, 0, challenged.stderr);
+  const fakeState = JSON.parse(fs.readFileSync(path.join(binDir, "fake-codex-state.json"), "utf8"));
+  assert.match(fakeState.lastTurnStart.prompt, /challenge retry boundaries/);
+  assert.doesNotMatch(fakeState.lastTurnStart.prompt, /No extra focus provided/);
+  assert.doesNotMatch(fakeState.lastTurnStart.prompt, /--background/);
 });
 
 test("status shows phases, hints, and the latest finished job", () => {

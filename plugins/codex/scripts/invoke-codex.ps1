@@ -24,11 +24,12 @@ param(
   [string]$OutName = "codex-out.md",
 
   [Parameter(Mandatory = $false)]
-  [ValidateSet("none", "minimal", "low", "medium", "high", "xhigh", "max")]
-  [string]$Effort = "medium",
+  [ValidateSet("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")]
+  [string]$Effort,
 
   [Parameter(Mandatory = $false)]
-  [string]$Profile,
+  [Alias("Profile")]
+  [string]$CodexProfile,
 
   [Parameter(Mandatory = $false)]
   [switch]$ReadOnly,
@@ -72,11 +73,13 @@ if (-not $CodexCmd) {
 }
 
 $codexArgs = @("exec")
-if ($Profile) {
-  $codexArgs += @("--profile", $Profile)
+if ($CodexProfile) {
+  $codexArgs += @("--profile", $CodexProfile)
+}
+if ($PSBoundParameters.ContainsKey("Effort")) {
+  $codexArgs += @("-c", "model_reasoning_effort=$Effort")
 }
 $codexArgs += @(
-  "-c", "model_reasoning_effort=$Effort",
   "-C", $repoPath,
   "-o", $outFile
 )
@@ -98,7 +101,8 @@ if ($PromptFile) {
 
 $code = $LASTEXITCODE
 if ($code -ne 0) {
-  throw "codex exited with code $code"
+  [Console]::Error.WriteLine("invoke-codex: codex exited with code $code")
+  exit $code
 }
 Write-Host "invoke-codex: wrote $outFile"
 exit 0

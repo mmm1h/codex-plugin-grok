@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { makeTempDir } from "./helpers.mjs";
+import { STOP_REVIEW_TASK_MARKER } from "../plugins/codex/scripts/lib/prompts.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
@@ -208,40 +209,47 @@ test("Windows invoke-codex helper ships and avoids bash stdin redirection", () =
   assert.match(source, /tmp\/codex-out|tmp\\codex-out|Join-Path.*tmp/);
   assert.doesNotMatch(source, /codex exec[^\n]*<\s/);
   assert.match(source, /PromptFile/);
-  assert.doesNotMatch(source, /\[string\]\$Profile\s*=\s*["']codex-api["']/i);
-  assert.match(source, /if \(\$Profile\)/);
+  assert.match(source, /\[Alias\(["']Profile["']\)\]/i);
+  assert.match(source, /\[string\]\$CodexProfile/i);
+  assert.doesNotMatch(source, /\[string\]\$Effort\s*=/i);
+  assert.match(source, /\$PSBoundParameters\.ContainsKey\(["']Effort["']\)/i);
   assert.ok(
     source.indexOf('npm\\codex.cmd') < source.indexOf('Get-Command codex -ErrorAction'),
     "codex.cmd should be preferred over codex.ps1"
   );
 });
 
-test("Windows invoke-codex helper omits --profile unless explicitly requested", { skip: process.platform !== "win32" }, () => {
+test("Windows invoke-codex helper only applies explicit overrides and preserves exit codes", { skip: process.platform !== "win32" }, () => {
   const repo = makeTempDir("codex-pwsh-helper-");
   const helper = path.join(PLUGIN_ROOT, "scripts", "invoke-codex.ps1");
   const fakeCodex = path.join(repo, "fake-codex.cmd");
+  const fakeCodexEntry = path.join(repo, "fake-codex.mjs");
   const argsFile = path.join(repo, "args.txt");
+  fs.writeFileSync(
+    fakeCodexEntry,
+    [
+      'import fs from "node:fs";',
+      "const args = process.argv.slice(2);",
+      'fs.writeFileSync(process.env.CODEX_TEST_ARGS, `${args.join("\\n")}\\n`, "utf8");',
+      'const outputIndex = args.indexOf("-o");',
+      'if (outputIndex >= 0) fs.writeFileSync(args[outputIndex + 1], "fake result\\n", "utf8");',
+      "process.exitCode = Number(process.env.CODEX_TEST_EXIT || 0);",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
   fs.writeFileSync(
     fakeCodex,
     [
       "@echo off",
-      "setlocal EnableDelayedExpansion",
-      "set \"outFile=\"",
-      ":loop",
-      "if \"%~1\"==\"\" goto done",
-      ">>\"%CODEX_TEST_ARGS%\" echo %~1",
-      "if \"%~1\"==\"-o\" set \"outFile=%~2\"",
-      "shift",
-      "goto loop",
-      ":done",
-      "if defined outFile >\"!outFile!\" echo fake result",
-      "exit /b 0",
+      `"${process.execPath}" "${fakeCodexEntry}" %*`,
+      "exit /b %ERRORLEVEL%",
       ""
     ].join("\r\n"),
     "utf8"
   );
 
-  const invoke = (extra = []) =>
+  const invoke = (extra = [], env = {}) =>
     spawnSync(
       "pwsh",
       [
@@ -258,7 +266,7 @@ test("Windows invoke-codex helper omits --profile unless explicitly requested", 
       ],
       {
         cwd: repo,
-        env: { ...process.env, CODEX_TEST_ARGS: argsFile },
+        env: { ...process.env, CODEX_TEST_ARGS: argsFile, ...env },
         encoding: "utf8",
         windowsHide: true
       }
@@ -268,13 +276,40 @@ test("Windows invoke-codex helper omits --profile unless explicitly requested", 
   assert.equal(withoutProfile.status, 0, withoutProfile.stderr);
   let captured = fs.readFileSync(argsFile, "utf8");
   assert.doesNotMatch(captured, /^--profile$/m);
+  assert.doesNotMatch(captured, /model_reasoning_effort=/);
   assert.equal(fs.existsSync(path.join(repo, "tmp", "codex-out", "default.md")), true);
 
   fs.writeFileSync(argsFile, "", "utf8");
-  const withProfile = invoke(["-Profile", "codex-api", "-OutName", "profile.md"]);
+  const withProfile = invoke(["-Profile", "codex-api", "-Effort", "ultra", "-OutName", "profile.md"]);
   assert.equal(withProfile.status, 0, withProfile.stderr);
   captured = fs.readFileSync(argsFile, "utf8");
   assert.match(captured, /^--profile\r?\ncodex-api$/m);
+  assert.match(captured, /^model_reasoning_effort=ultra$/m);
+
+  fs.writeFileSync(argsFile, "", "utf8");
+  const failed = invoke(["-OutName", "failed.md"], { CODEX_TEST_EXIT: "17" });
+  assert.equal(failed.status, 17, failed.stderr);
+  assert.match(failed.stderr, /codex exited with code 17/i);
+});
+
+test("companion usage exposes host-controlled review flags and resume discovery", () => {
+  const companion = path.join(PLUGIN_ROOT, "scripts", "codex-companion.mjs");
+  const result = spawnSync(process.execPath, [companion, "--help"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    windowsHide: true
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /review \[--wait\|--background\].*direct CLI stays foreground/);
+  assert.match(result.stdout, /adversarial-review \[--wait\|--background\].*direct CLI stays foreground/);
+  assert.match(result.stdout, /task-resume-candidate \[--json\]/);
+  assert.doesNotMatch(result.stdout, /^\s+node .* task-worker/m);
+});
+
+test("stop review prompt keeps the shared task marker", () => {
+  const template = read("prompts/stop-review-gate.md");
+  assert.equal(template.includes(STOP_REVIEW_TASK_MARKER), true);
 });
 
 test("build preflight uses a cross-platform Node generator", () => {

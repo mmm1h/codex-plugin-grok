@@ -10,7 +10,7 @@
 
 - Stop review gate ignores Grok's observe-only session-close event, keeps its internal timeout below Grok's outer deadline, and terminates timed-out process trees
 - SessionStart and transfer now share resolved cwd encoding; manifest URL loading uses Node's UNC-safe URL parser
-- Windows launcher uses the default Codex configuration unless `-Profile` is explicit and prefers `codex.cmd`
+- Windows launcher preserves the configured reasoning effort unless `-Effort` is explicit, only adds a profile when `-Profile` is explicit, and prefers `codex.cmd`
 - Build type generation now uses a cross-platform Node launcher instead of POSIX `mkdir -p`
 - Runtime tests use Grok camelCase hook envelopes and cover hook-event dispatch without argv fallbacks
 
