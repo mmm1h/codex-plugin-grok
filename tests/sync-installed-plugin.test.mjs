@@ -132,6 +132,99 @@ test("sync-installed can update a copied marketplace plugin tree", () => {
   assert.match(fs.readFileSync(path.join(installedDir, "scripts", "runtime.mjs"), "utf8"), /source/);
 });
 
+test("sync-installed deploys a user plugin with dry-run safety and no installed snapshot", () => {
+  const root = makeTempDir("codex-sync-user-plugin-");
+  const sourceDir = path.join(root, "checkout", "plugins", "codex");
+  const grokHome = path.join(root, ".grok");
+  const userPluginDir = path.join(grokHome, "plugins", "codex");
+  const claudeMarker = path.join(root, ".claude", "plugins", "codex", "marker.txt");
+
+  makePlugin(sourceDir, "source");
+  fs.mkdirSync(path.dirname(claudeMarker), { recursive: true });
+  fs.writeFileSync(claudeMarker, "leave untouched\n");
+
+  const dryRun = run(process.execPath, [
+    SCRIPT,
+    "--source",
+    sourceDir,
+    "--grok-home",
+    grokHome,
+    "--deploy-user-plugin"
+  ]);
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /Mode: dry-run/);
+  assert.match(dryRun.stdout, /User plugin deployment/);
+  assert.match(dryRun.stdout, /target does not exist; it will be created/);
+  assert.match(dryRun.stdout, new RegExp(userPluginDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(fs.existsSync(userPluginDir), false);
+
+  const applied = run(process.execPath, [
+    SCRIPT,
+    "--source",
+    sourceDir,
+    "--grok-home",
+    grokHome,
+    "--deploy-user-plugin",
+    "--apply"
+  ]);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(applied.stdout, /User plugin deployed/);
+  assert.match(applied.stdout, /new directory created/);
+  assert.match(applied.stdout, /Reload Grok plugins/);
+  assert.match(fs.readFileSync(path.join(userPluginDir, "scripts", "runtime.mjs"), "utf8"), /source/);
+  assert.equal(fs.readFileSync(claudeMarker, "utf8"), "leave untouched\n");
+});
+
+test("sync-installed reports and updates an existing user plugin directory", () => {
+  const root = makeTempDir("codex-sync-user-plugin-existing-");
+  const sourceDir = path.join(root, "checkout", "plugins", "codex");
+  const grokHome = path.join(root, ".grok");
+  const userPluginDir = path.join(grokHome, "plugins", "codex");
+
+  makePlugin(sourceDir, "source");
+  makePlugin(userPluginDir, "old");
+
+  const applied = run(process.execPath, [
+    SCRIPT,
+    "--source",
+    sourceDir,
+    "--grok-home",
+    grokHome,
+    "--deploy-user-plugin",
+    "--apply"
+  ]);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(applied.stdout, /target exists; managed plugin files will be overwritten/);
+  assert.match(applied.stdout, /existing directory updated/);
+  assert.match(fs.readFileSync(path.join(userPluginDir, "scripts", "runtime.mjs"), "utf8"), /source/);
+});
+
+test("sync-installed refuses to overwrite a non-codex user plugin directory", () => {
+  const root = makeTempDir("codex-sync-user-plugin-unrelated-");
+  const sourceDir = path.join(root, "checkout", "plugins", "codex");
+  const grokHome = path.join(root, ".grok");
+  const userPluginDir = path.join(grokHome, "plugins", "codex");
+
+  makePlugin(sourceDir, "source");
+  writeJson(path.join(userPluginDir, "plugin.json"), {
+    name: "unrelated",
+    version: "1.0.0"
+  });
+
+  const result = run(process.execPath, [
+    SCRIPT,
+    "--source",
+    sourceDir,
+    "--grok-home",
+    grokHome,
+    "--deploy-user-plugin",
+    "--apply"
+  ]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Target is not a codex plugin directory/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(userPluginDir, "plugin.json"), "utf8")).name, "unrelated");
+});
+
 test("sync-installed refuses unrelated codex snapshots", () => {
   const root = makeTempDir("codex-sync-unrelated-");
   const sourceDir = path.join(root, "checkout", "plugins", "codex");

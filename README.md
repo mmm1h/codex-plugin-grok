@@ -60,9 +60,13 @@ For local development, this repository can safely find the matching `codex-plugi
 ```bash
 npm run sync-installed
 npm run sync-installed -- --apply
+npm run sync-installed -- --deploy-user-plugin
+npm run sync-installed -- --deploy-user-plugin --apply
 ```
 
-Add `--update-marketplace` to refresh a copied local marketplace tree as well. If the marketplace already points at this checkout, the script leaves it alone and reports that only a reload is needed. The script never reloads Grok automatically; reload plugins (`r` in the Plugins tab) or start a new session after `--apply`.
+The default target under `~/.grok/installed-plugins/` is Grok's marketplace-managed snapshot: syncing it keeps the installed package current, but that directory is not part of Grok's plugin discovery priority list. Add `--deploy-user-plugin` to also deploy this fork to `~/.grok/plugins/codex`, the user-level discovery location that wins over same-name plugins under `~/.claude/plugins/`. Both forms remain dry runs unless `--apply` is present.
+
+Add `--update-marketplace` to refresh a copied local marketplace tree as well. If the marketplace already points at this checkout, the script leaves it alone and reports that only a reload is needed. The script never changes anything under `~/.claude/` and never reloads Grok automatically; reload plugins (`r` in the Plugins tab) or start a new session after `--apply`.
 
 `/codex:setup` reports whether Codex is ready. If Codex is missing and npm is available, it can offer to install Codex for you.
 
@@ -227,7 +231,17 @@ That flag enables Claude-compat skill loading for plugin slash entries; it is no
 
 **Q: `grok inspect` resolves `codex` from `~/.claude/plugins/...` instead of `~/.grok/installed-plugins/...`?**
 
-A: The official Claude Code plugin and this fork both use the `codex` name to provide the `/codex:*` namespace, and Grok gives the Claude-compatible source priority when it deduplicates same-name plugins. They cannot coexist in Grok discovery. Check the conflicting install with `claude plugin list`, then disable it with `claude plugin disable codex@openai-codex` (add `--scope user`, `--scope project`, or `--scope local` to match its listed scope) or uninstall it if it is no longer needed. Next run `grok plugin update codex`, reload plugins (`r` in the Plugins tab) or start a new session, and verify that `grok inspect --json` selects a path under `~/.grok/installed-plugins/`. Keeping the official plugin enabled for Claude Code will continue to shadow this fork in Grok.
+A: `~/.grok/installed-plugins/` is Grok's marketplace install location, but it is not in Grok's plugin discovery priority list. Grok also discovers Claude-compatible plugins under `~/.claude/plugins/`, and when two plugins share the `codex` name the higher-priority discovered copy wins. As a result, the marketplace snapshot under `~/.grok/installed-plugins/` cannot override the official Claude plugin.
+
+Deploy this fork to Grok's user-level discovery directory, then reload plugins (`r` in the Plugins tab) or start a new session:
+
+```bash
+npm run sync-installed -- --deploy-user-plugin --apply
+```
+
+This writes the fork to `~/.grok/plugins/codex`, which is in Grok's priority table, is automatically trusted, and takes precedence over `~/.claude/plugins/`. You do not need to disable or uninstall the official Claude plugin: it can remain available to Claude Code while Grok selects this fork. `claude plugin disable` only changes Claude Code's enabled-plugin state and has no effect on Grok discovery.
+
+Verify with `grok inspect --json`: the `codex` entry's `path` should point to `~/.grok/plugins/codex`. Its `provides.skills` should contain 11 skills for this fork rather than the official plugin's 3.
 
 ## Direct CLI (without slash commands)
 

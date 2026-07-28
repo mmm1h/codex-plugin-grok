@@ -30,20 +30,22 @@ const TARGET_PRUNE_ROOTS = new Set([".claude-plugin", ".generated", ".grok-plugi
 function usage() {
   return [
     "Usage:",
-    "  node scripts/sync-installed-plugin.mjs [--apply] [--update-marketplace]",
+    "  node scripts/sync-installed-plugin.mjs [--apply] [--update-marketplace] [--deploy-user-plugin]",
     "",
     "Options:",
-    "  --apply                Write changes. The default is a dry run.",
-    "  --update-marketplace   Also refresh a copied marketplace plugin tree.",
-    "  --source <dir>         Source plugin directory (default: plugins/codex).",
-    "  --grok-home <dir>      Grok home (default: GROK_HOME or ~/.grok).",
-    "  --help                 Print this help."
+    "  --apply                 Write changes. The default is a dry run.",
+    "  --update-marketplace    Also refresh a copied marketplace plugin tree.",
+    "  --deploy-user-plugin    Deploy to <grok-home>/plugins/codex for Grok discovery.",
+    "  --source <dir>          Source plugin directory (default: plugins/codex).",
+    "  --grok-home <dir>       Grok home (default: GROK_HOME or ~/.grok).",
+    "  --help                  Print this help."
   ].join("\n");
 }
 
 export function parseArgs(argv, env = process.env) {
   const options = {
     apply: false,
+    deployUserPlugin: false,
     updateMarketplace: false,
     source: path.join(DEFAULT_ROOT, "plugins", "codex"),
     grokHome: env.GROK_HOME || path.join(os.homedir(), ".grok")
@@ -53,6 +55,8 @@ export function parseArgs(argv, env = process.env) {
     const arg = argv[index];
     if (arg === "--apply") {
       options.apply = true;
+    } else if (arg === "--deploy-user-plugin") {
+      options.deployUserPlugin = true;
     } else if (arg === "--update-marketplace") {
       options.updateMarketplace = true;
     } else if (arg === "--source" || arg === "--grok-home") {
@@ -212,16 +216,20 @@ function entriesEqual(left, right) {
   return true;
 }
 
-export function planSync(sourceDir, targetDir) {
+export function planSync(sourceDir, targetDir, { allowMissingTarget = false } = {}) {
   if (readPluginName(sourceDir) !== "codex") {
     throw new Error(`Source is not a codex plugin directory: ${sourceDir}`);
   }
-  if (readPluginName(targetDir) !== "codex") {
+  const targetExists = fs.existsSync(targetDir);
+  if (!targetExists && !allowMissingTarget) {
+    throw new Error(`Target plugin directory does not exist: ${targetDir}`);
+  }
+  if (targetExists && readPluginName(targetDir) !== "codex") {
     throw new Error(`Target is not a codex plugin directory: ${targetDir}`);
   }
 
   const source = inventoryTree(sourceDir, PLUGIN_PAYLOAD_ROOTS);
-  const target = inventoryTree(targetDir);
+  const target = targetExists ? inventoryTree(targetDir) : new Map();
   const managedRoots = new Set(
     [...source.keys()].map((relativePath) => relativePath.split(path.sep, 1)[0]).filter(Boolean)
   );
@@ -345,10 +353,13 @@ function resolveMarketplaceCopies(records, sourceDir, installedTargets) {
   return { copies, linked };
 }
 
-function printSync(sourceDir, targetDir, changes, apply, label) {
+function printSync(sourceDir, targetDir, changes, apply, label, targetStatus = null) {
   console.log(`${label}:`);
   console.log(`  from ${sourceDir}`);
   console.log(`  to   ${targetDir}`);
+  if (targetStatus) {
+    console.log(`  target ${targetStatus}`);
+  }
   console.log(`  ${summarize(changes)}`);
   for (const change of changes.filter((entry) => entry.action !== "unchanged").slice(0, 30)) {
     console.log(`  ${change.action.padEnd(6)} ${change.relativePath}`);
@@ -369,12 +380,15 @@ export function runSync(options) {
   }
 
   const discovery = discoverInstalledTargets({ grokHome: options.grokHome, sourceDir });
-  if (discovery.targets.length === 0) {
+  if (discovery.targets.length === 0 && !options.deployUserPlugin) {
     const evidence = discovery.registryPath ? ` using ${discovery.registryPath}` : "";
     throw new Error(`No installed codex-plugin-grok snapshot found${evidence}.`);
   }
 
   console.log(options.apply ? "Mode: apply" : "Mode: dry-run (pass --apply to write)");
+  if (discovery.targets.length === 0) {
+    console.log("No installed codex-plugin-grok snapshot found; continuing with user plugin deployment.");
+  }
   for (const targetDir of discovery.targets) {
     const changes = planSync(sourceDir, targetDir);
     printSync(sourceDir, targetDir, changes, options.apply, "Installed snapshot");
@@ -391,6 +405,23 @@ export function runSync(options) {
     }
     if (marketplace.linked.length === 0 && marketplace.copies.length === 0) {
       console.log("No local marketplace copy found; installed snapshot sync is still complete.");
+    }
+  }
+
+  if (options.deployUserPlugin) {
+    const targetDir = path.join(options.grokHome, "plugins", "codex");
+    const targetExists = fs.existsSync(targetDir);
+    const changes = planSync(sourceDir, targetDir, { allowMissingTarget: true });
+    const targetStatus = targetExists
+      ? "exists; managed plugin files will be overwritten"
+      : "does not exist; it will be created";
+    printSync(sourceDir, targetDir, changes, options.apply, "User plugin deployment", targetStatus);
+    if (options.apply) {
+      console.log(
+        `User plugin deployed to ${targetDir} (${targetExists ? "existing directory updated" : "new directory created"}).`
+      );
+    } else {
+      console.log(`User plugin would be deployed to ${targetDir}; dry run made no changes.`);
     }
   }
 

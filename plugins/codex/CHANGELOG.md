@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1-grok
+
+### Deployment
+
+- Add `sync-installed -- --deploy-user-plugin` to deploy the fork to `~/.grok/plugins/codex`, a user-level discovery location that takes priority over same-name plugins under `~/.claude/plugins/`
+- Keep deployment dry-run by default, report whether the user plugin target will be created or overwritten, and require `--apply` before writing
+
+### Documentation
+
+- Correct the same-name plugin FAQ: `~/.grok/installed-plugins/` is not in Grok's discovery priority list, and disabling the official plugin through Claude Code does not affect Grok
+- Document that the Grok fork and official Claude plugin can coexist, plus verification through the selected `path` and `provides.skills` in `grok inspect --json`
+
 ## 1.2.0-grok
 
 ### Behavior changes

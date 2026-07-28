@@ -259,7 +259,10 @@ test("shipped docs avoid machine-local absolute user paths", () => {
   assert.doesNotMatch(agent, /C:\/Users\/PC/i);
   assert.match(readme, /\/path\/to\/codex-plugin-grok|path\/to\/codex-plugin-grok/);
   assert.match(readme, /grok plugin update codex/);
-  assert.match(readme, /deduplicates same-name plugins/i);
+  assert.match(readme, /not in Grok's plugin discovery priority list/i);
+  assert.match(readme, /~\/\.grok\/plugins\/codex/);
+  assert.match(readme, /claude plugin disable[^.\n]*no effect on Grok discovery/i);
+  assert.match(readme, /11 skills[^.\n]*official plugin's 3/i);
 });
 
 test("setup command can offer Codex install and still points users to codex login", () => {

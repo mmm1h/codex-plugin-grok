@@ -1,6 +1,6 @@
 {
   "name": "@mmm1h/codex-plugin-grok",
-  "version": "1.2.0-grok",
+  "version": "1.2.1-grok",
   "private": true,
   "type": "module",
   "description": "Use Codex from Grok Build to review code or delegate tasks.",
