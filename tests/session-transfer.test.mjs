@@ -4,7 +4,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { convertGrokChatHistoryToClaudeJsonl } from "../plugins/codex/scripts/lib/session-transfer.mjs";
+import {
+  convertGrokChatHistoryToImportJsonl,
+  resolveSessionTransferSource
+} from "../plugins/codex/scripts/lib/session-transfer.mjs";
 import { makeTempDir } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,8 +29,8 @@ function countTypes(rows) {
   return counts;
 }
 
-test("convertGrokChatHistoryToClaudeJsonl preserves user, assistant, and tool substance", () => {
-  const converted = convertGrokChatHistoryToClaudeJsonl(FIXTURE, {
+test("convertGrokChatHistoryToImportJsonl preserves user, assistant, and tool substance", () => {
+  const converted = convertGrokChatHistoryToImportJsonl(FIXTURE, {
     cwd: ROOT,
     title: "fixture-session"
   });
@@ -48,7 +51,7 @@ test("convertGrokChatHistoryToClaudeJsonl preserves user, assistant, and tool su
   assert.doesNotMatch(joined, /thinking about tools/);
 });
 
-test("convertGrokChatHistoryToClaudeJsonl keeps tool_results from a temp real-shaped sample", () => {
+test("convertGrokChatHistoryToImportJsonl keeps tool_results from a temp real-shaped sample", () => {
   const dir = makeTempDir("grok-transfer-");
   const source = path.join(dir, "chat_history.jsonl");
   fs.writeFileSync(
@@ -70,7 +73,7 @@ test("convertGrokChatHistoryToClaudeJsonl keeps tool_results from a temp real-sh
     "utf8"
   );
 
-  const rows = parseJsonl(convertGrokChatHistoryToClaudeJsonl(source, { cwd: dir, title: "tmp" }));
+  const rows = parseJsonl(convertGrokChatHistoryToImportJsonl(source, { cwd: dir, title: "tmp" }));
   const userTexts = rows.filter((r) => r.type === "user").map((r) => r.message.content);
   const assistantTexts = rows.filter((r) => r.type === "assistant").map((r) => r.message.content);
 
@@ -78,4 +81,57 @@ test("convertGrokChatHistoryToClaudeJsonl keeps tool_results from a temp real-sh
   assert.ok(userTexts.some((t) => t.includes("[tool_result") && t.includes("nothing to commit")));
   assert.ok(assistantTexts.some((t) => t.includes("[tool_call") && t.includes("run_terminal_command")));
   assert.ok(assistantTexts.some((t) => t.includes("Working tree is clean")));
+});
+
+test("resolveSessionTransferSource stages under Codex convention without pre-existing Claude install", () => {
+  const isolatedHome = makeTempDir("pure-grok-home-");
+  const repo = path.join(isolatedHome, "repo");
+  fs.mkdirSync(repo, { recursive: true });
+  const prevHome = process.env.HOME;
+  const prevProfile = process.env.USERPROFILE;
+  const prevGrokHome = process.env.GROK_HOME;
+  process.env.HOME = isolatedHome;
+  process.env.USERPROFILE = isolatedHome;
+  process.env.GROK_HOME = path.join(isolatedHome, ".grok");
+
+  try {
+    assert.equal(fs.existsSync(path.join(isolatedHome, ".claude")), false);
+    const group = encodeURIComponent(path.resolve(repo));
+    const sessionDir = path.join(isolatedHome, ".grok", "sessions", group, "pure-sess");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const source = path.join(sessionDir, "chat_history.jsonl");
+    fs.writeFileSync(
+      source,
+      [
+        JSON.stringify({ type: "user", content: "pure grok transfer" }),
+        JSON.stringify({ type: "assistant", content: "ok" })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const result = resolveSessionTransferSource(repo, { source });
+    assert.equal(result.host, "grok");
+    assert.equal(result.converted, true);
+    assert.match(result.importPath.replace(/\\/g, "/"), /\.claude\/projects\/-grok-codex-transfer\//);
+    assert.equal(fs.existsSync(result.importPath), true);
+    const body = fs.readFileSync(result.importPath, "utf8");
+    assert.match(body, /pure grok transfer/);
+    assert.match(body, /"type":"assistant"/);
+  } finally {
+    if (prevHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = prevHome;
+    }
+    if (prevProfile == null) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = prevProfile;
+    }
+    if (prevGrokHome == null) {
+      delete process.env.GROK_HOME;
+    } else {
+      process.env.GROK_HOME = prevGrokHome;
+    }
+  }
 });

@@ -302,12 +302,7 @@ function getCurrentSessionId(env = process.env) {
   );
 }
 
-/** @deprecated Use getCurrentSessionId */
-function getCurrentClaudeSessionId(env = process.env) {
-  return getCurrentSessionId(env);
-}
-
-function filterJobsForCurrentClaudeSession(jobs) {
+function filterJobsForCurrentSession(jobs) {
   const sessionId = getCurrentSessionId();
   if (!sessionId) {
     return jobs;
@@ -347,9 +342,9 @@ async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
 
 async function resolveLatestTrackedTaskThread(cwd, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
-  const sessionId = getCurrentClaudeSessionId();
+  const sessionId = getCurrentSessionId();
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot)).filter((job) => job.id !== options.excludeJobId);
-  const visibleJobs = filterJobsForCurrentClaudeSession(jobs);
+  const visibleJobs = filterJobsForCurrentSession(jobs);
   const activeTask = visibleJobs.find((job) => job.jobClass === "task" && (job.status === "queued" || job.status === "running"));
   if (activeTask) {
     throw new Error(`Task ${activeTask.id} is still running. Use /codex:status before continuing it.`);
@@ -956,8 +951,8 @@ function handleTaskResumeCandidate(argv) {
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
-  const sessionId = getCurrentClaudeSessionId();
-  const jobs = filterJobsForCurrentClaudeSession(sortJobsNewestFirst(listJobs(workspaceRoot)));
+  const sessionId = getCurrentSessionId();
+  const jobs = filterJobsForCurrentSession(sortJobsNewestFirst(listJobs(workspaceRoot)));
   const candidate = findLatestResumableTaskJob(jobs);
 
   const payload = {

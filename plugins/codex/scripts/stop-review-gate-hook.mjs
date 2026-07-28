@@ -57,8 +57,7 @@ function buildStopReviewPrompt(input = {}) {
     ? ["Previous host agent response:", lastAssistantMessage].join("\n")
     : "";
   return interpolateTemplate(template, {
-    HOST_RESPONSE_BLOCK: hostResponseBlock,
-    CLAUDE_RESPONSE_BLOCK: hostResponseBlock
+    HOST_RESPONSE_BLOCK: hostResponseBlock
   });
 }
 

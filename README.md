@@ -186,6 +186,24 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 | Claude Code app / Claude account | **No** |
 | Pre-existing `~/.claude` | **No** (transfer creates the staging dir if needed) |
 
+### FAQ
+
+**Q: Why does transfer create a folder under `~/.claude`?**  
+A: Codex CLI's session-import API historically only writes ledger entries for paths under `~/.claude/projects/…`. This plugin auto-creates `~/.claude/projects/-grok-codex-transfer/` as a **staging directory**. It is not Claude Code dual-host support and does not require installing Claude.
+
+**Q: Do I need Claude Code for setup / review / rescue / status?**  
+A: No. Those paths use only Grok env vars (`GROK_PLUGIN_*`, `GROK_SESSION_ID`) and the local `codex` CLI.
+
+**Q: Slash commands show as `[claude]` or stay disabled?**  
+A: On some Grok builds, plugin skills are tagged `[claude]` in `grok inspect`. If slash entries stay disabled, set in `~/.grok/config.toml`:
+
+```toml
+[compat.claude]
+skills = true
+```
+
+That flag enables Claude-compat skill loading for plugin slash entries; it is not the same as installing Claude Code. Then reload plugins (`r` in the Plugins tab).
+
 ## Direct CLI (without slash commands)
 
 Grok can also call the companion script or `codex exec` directly:

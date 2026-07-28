@@ -130,9 +130,9 @@ function pushTurn(out, type, cwd, text) {
 
 /**
  * Convert a Grok session chat_history.jsonl into JSONL that Codex
- * externalAgentConfig/import can consume (Claude-compatible turn shape).
+ * externalAgentConfig/import can consume (Codex import turn shape).
  */
-export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
+export function convertGrokChatHistoryToImportJsonl(sourcePath, options = {}) {
   const raw = fs.readFileSync(sourcePath, "utf8");
   const lines = raw.split(/\r?\n/).filter((line) => line.trim());
   const cwd = options.cwd || process.cwd();
@@ -225,7 +225,7 @@ function materializeGrokImportSource(sourcePath, cwd) {
     // optional
   }
 
-  const converted = convertGrokChatHistoryToClaudeJsonl(sourcePath, { cwd, title });
+  const converted = convertGrokChatHistoryToImportJsonl(sourcePath, { cwd, title });
   // Stage under Codex's expected import tree (auto-create; no Claude app required).
   const importDir = resolveCodexImportStagingDir();
   fs.mkdirSync(importDir, { recursive: true });
@@ -306,7 +306,3 @@ export function resolveSessionTransferSource(cwd, options = {}) {
   };
 }
 
-/** @deprecated Prefer resolveSessionTransferSource. */
-export function resolveClaudeSessionPath(cwd, options = {}) {
-  return resolveSessionTransferSource(cwd, options).importPath;
-}

@@ -582,7 +582,7 @@ test("task-resume-candidate returns the latest rescue thread from the current se
   assert.equal(payload.candidate.threadId, "thr_current");
 });
 
-test("task --resume-last does not resume a task from another Claude session", () => {
+test("task --resume-last does not resume a task from another host session", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -626,7 +626,7 @@ test("task --resume-last does not resume a task from another Claude session", ()
   assert.equal(fakeState.lastTurnStart.prompt, "initial task");
 });
 
-test("task --resume-last ignores running tasks from other Claude sessions", () => {
+test("task --resume-last ignores running tasks from other host sessions", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeCodex(binDir);
@@ -1174,7 +1174,7 @@ test("status shows phases, hints, and the latest finished job", () => {
   assert.match(result.stdout, /Resume in Codex: codex resume thr_done/);
 });
 
-test("status without a job id only shows jobs from the current Claude session", () => {
+test("status without a job id only shows jobs from the current host session", () => {
   const workspace = makeTempDir();
   const stateDir = resolveStateDir(workspace);
   const jobsDir = path.join(stateDir, "jobs");
@@ -1429,7 +1429,7 @@ test("result returns the stored output for the latest finished job by default", 
   );
 });
 
-test("result without a job id prefers the latest finished job from the current Claude session", () => {
+test("result without a job id prefers the latest finished job from the current host session", () => {
   const workspace = makeTempDir();
   const stateDir = resolveStateDir(workspace);
   const jobsDir = path.join(stateDir, "jobs");
@@ -1648,7 +1648,7 @@ test("cancel stops an active background job and marks it cancelled", async (t) =
   assert.match(fs.readFileSync(logFile, "utf8"), /Cancelled by user/);
 });
 
-test("cancel without a job id ignores active jobs from other Claude sessions", () => {
+test("cancel without a job id ignores active jobs from other host sessions", () => {
   const workspace = makeTempDir();
   const stateDir = resolveStateDir(workspace);
   const jobsDir = path.join(stateDir, "jobs");
@@ -1703,7 +1703,7 @@ test("cancel without a job id ignores active jobs from other Claude sessions", (
   assert.equal(state.jobs[0].status, "running");
 });
 
-test("cancel with a job id can still target an active job from another Claude session", () => {
+test("cancel with a job id can still target an active job from another host session", () => {
   const workspace = makeTempDir();
   const stateDir = resolveStateDir(workspace);
   const jobsDir = path.join(stateDir, "jobs");
