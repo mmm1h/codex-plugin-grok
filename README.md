@@ -91,6 +91,8 @@ One simple first run:
 /codex:result
 ```
 
+Slash entrypoints pass non-empty arguments through a one-shot args file created by Grok's structured `search_replace` tool. The raw slash text is never interpolated into a shell command, closing the command-injection surface from shell metacharacters; empty or whitespace-only calls take the direct fast path.
+
 ## Usage
 
 ### `/codex:review`
@@ -186,8 +188,8 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 | Host | **Grok Build only** (no Claude Code dual-host) |
 | Plugin env | `GROK_PLUGIN_ROOT` / `GROK_PLUGIN_DATA` / `GROK_SESSION_ID` |
 | Hook envelopes | Grok camelCase (`sessionId`, `lastAssistantMessage`, `hookEventName`) |
-| Tools in commands/skills | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
-| Slash entrypoints | `commands/` + Grok-native `skills/<name>/SKILL.md` |
+| Tools in commands/skills | `run_terminal_command`, `search_replace`, `spawn_subagent`, `ask_user_question` |
+| Slash entrypoints | `commands/` + Grok-native `skills/<name>/SKILL.md`; non-empty arguments use the one-shot args-file channel |
 | Background work | Slash review/rescue flows use Grok shell `background: true` for completion callbacks. Direct `task --background` is detached and must be checked with status/result |
 | Session transfer | Source = Grok sessions; defaults to `~/.claude/projects/-grok-codex-transfer/` for the Codex 0.145.0 import convention, with `CODEX_TRANSFER_STAGING_DIR` available for compatible overrides |
 | Plugin manifest | `plugins/codex/plugin.json` is the single root manifest read by Grok CLI |
@@ -236,6 +238,8 @@ node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the fai
 # short prompt as args:
 codex exec -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
 ```
+
+The args-file transport above is specific to plugin slash entrypoints. Direct CLI usage keeps the positional argument form unchanged; when invoking it from your own shell, you remain responsible for that shell's quoting and escaping.
 
 **Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Prefer a **portable** output dir (`<repo>/tmp/codex-out/`), not a machine-local path.
 

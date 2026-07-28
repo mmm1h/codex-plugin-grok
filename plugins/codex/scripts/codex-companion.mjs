@@ -197,6 +197,10 @@ function extractArgsFileOptions(argv) {
   return { argsFiles, insertionIndex, remaining };
 }
 
+/**
+ * @param {string[]} argv
+ * @param {{ allowArgsFile?: boolean, booleanOptions?: string[], valueOptions?: string[], aliasMap?: Record<string, string> }} [config]
+ */
 function parseCommandInput(argv, config = {}) {
   const { allowArgsFile = false, ...parseConfig } = config;
   const normalizedArgv = normalizeArgv(argv);
@@ -978,7 +982,6 @@ async function handleTaskWorker(argv) {
     throw new Error("Missing required --job-id for task-worker.");
   }
 
-  const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const storedJob = readStoredJob(workspaceRoot, options["job-id"]);
   if (!storedJob) {
@@ -1067,7 +1070,6 @@ function handleTaskResumeCandidate(argv) {
     booleanOptions: ["json"]
   });
 
-  const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const sessionId = getCurrentSessionId();
   const jobs = filterJobsForCurrentSession(sortJobsNewestFirst(listJobs(workspaceRoot)));

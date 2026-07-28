@@ -8,8 +8,11 @@ user-invocable: false
 
 Use this skill only inside the `codex:codex-rescue` subagent.
 
-Primary helper:
-- `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<raw arguments>"`
+Primary helper transport:
+- Keep the complete final task argument string as model data. Never place it in a shell command.
+- If that string is empty or whitespace-only, invoke `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task` directly without an args file.
+- Otherwise run `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" args-path task`, create the returned path with structured `search_replace` (`old_string` is empty and `new_string` is the complete final task argument string), then invoke `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --args-file "<trusted path>"`.
+- Request a fresh path for every task invocation. If `args-path` or `search_replace` fails, stop and report the failure; never fall back to shell interpolation.
 
 Execution rules:
 - The rescue subagent is a forwarder, not an orchestrator. Its only job is to invoke `task` once and return that stdout unchanged.
@@ -32,7 +35,7 @@ Command selection:
 - If the forwarded request includes `--fresh`, strip that token from the task text and do not add `--resume-last`.
 - `--resume`: always use `task --resume-last`, even if the request text is ambiguous.
 - `--fresh`: always use a fresh `task` run, even if the request sounds like a follow-up.
-- `--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+- `--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`; actual availability depends on the selected model.
 - `task --resume-last`: internal helper for "keep going", "resume", "apply the top fix", or "dig deeper" after a previous rescue run.
 
 Safety rules:
@@ -40,4 +43,4 @@ Safety rules:
 - Preserve the user's task text as-is apart from stripping routing flags.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Return the stdout of the `task` command exactly as-is.
-- If the shell call fails or Codex cannot be invoked, return nothing.
+- If the final `task` invocation fails or Codex cannot be invoked, return nothing. Handle `args-path` and `search_replace` failures with the fail-closed rule above.

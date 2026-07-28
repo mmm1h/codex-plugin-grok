@@ -163,7 +163,7 @@ export function encodeGrokSessionGroup(cwd) {
 }
 
 export function shellEscape(value) {
-  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
 /**

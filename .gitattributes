@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+tests/fixtures/**/*.jsonl text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.gz binary
+*.zip binary

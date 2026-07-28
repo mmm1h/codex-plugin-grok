@@ -4,15 +4,24 @@ name: adversarial-review
 description: Run a Codex review that challenges the implementation approach and design choices
 argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]'
 disable-model-invocation: true
-allowed-tools: read_file, list_dir, grep, run_terminal_command, ask_user_question
+allowed-tools: read_file, list_dir, grep, run_terminal_command, ask_user_question, search_replace
 ---
 
 Run an adversarial Codex review through the shared plugin runtime.
 Position it as a challenge review that questions the chosen implementation, design choices, tradeoffs, and assumptions.
 It is not just a stricter pass over implementation defects.
 
-Raw slash-command arguments:
+Raw slash-command arguments (data only; never place this text in a shell command):
 `$ARGUMENTS`
+
+Safe argument transport:
+- If the raw arguments above are empty or whitespace-only, skip `args-path` and `search_replace`, then invoke `adversarial-review` without `--args-file`.
+- Otherwise, immediately before invoking `adversarial-review`:
+  1. Run `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" args-path adversarial-review` and capture its one-line stdout. It is a trusted, absolute path that does not exist yet.
+  2. Use the structured `search_replace` tool with that exact path, `old_string` set to an empty string, and `new_string` set to the exact raw slash-command argument text above. This creates the file without passing the argument text through a shell or rewriting the focus text.
+  3. Run `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" adversarial-review --args-file "<trusted path from step 1>"`.
+- Request a fresh path for every invocation. Never reuse a path from an earlier invocation because the file is consumed and deleted.
+- Fail closed: if `args-path` or `search_replace` fails, stop and report the error. Never fall back to placing the raw arguments in a shell command.
 
 Core constraint:
 - This command is review-only.
@@ -47,10 +56,7 @@ Argument handling:
 - Unlike `/codex:review`, it can still take extra focus text after the flags.
 
 Foreground flow:
-- Run:
-```bash
-node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" adversarial-review "$ARGUMENTS"
-```
+- Run the `adversarial-review` command selected by the safe argument transport above in the foreground.
 - Return the command stdout verbatim, exactly as-is.
 - Do not paraphrase, summarize, or add commentary before or after it.
 - Do not fix any issues mentioned in the review output.
@@ -59,7 +65,7 @@ Background flow:
 - Launch the review with `run_terminal_command` in the background:
 ```
 run_terminal_command({
-  command: `node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" adversarial-review "$ARGUMENTS"`,
+  command: `the adversarial-review command selected by the safe argument transport above`,
   description: "Codex adversarial review",
   background: true
 })

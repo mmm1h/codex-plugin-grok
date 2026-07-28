@@ -1,6 +1,8 @@
-name: Pull Request CI
+name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -8,9 +10,13 @@ permissions:
 
 jobs:
   ci:
-    name: CI
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: CI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Check out repository
@@ -24,6 +30,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check version metadata
+        run: npm run check-version
+
+      - name: Validate plugin manifests
+        run: npm run validate-plugin
+
+      - name: Run lint
+        run: npm run lint
 
       - name: Install Codex CLI
         run: npm install -g @openai/codex
