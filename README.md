@@ -19,6 +19,8 @@ This plugin is for Grok users who want Codex as a second pair of hands without l
 - **Grok Build**
 - Local `codex` CLI (`npm install -g @openai/codex`)
 
+**You do not need Claude Code.** This plugin is Grok-only. Claude Code users should use [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc).
+
 ## Install in Grok
 
 Add the marketplace:
@@ -122,7 +124,17 @@ Notes:
 
 Creates a persistent Codex thread from the current Grok session and prints `codex resume <session-id>`.
 
-Reads `~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl` and converts turns (including tool call/result summaries) for Codex import.
+**Source (Grok):** reads `~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl` and converts turns (including tool call/result summaries).
+
+**Import staging (Codex path convention — not Claude Code):**
+
+Codex's `externalAgentConfig/import` only records sessions that live under the Claude Code projects tree. Pure Grok machines do **not** need Claude Code installed. On first transfer the plugin auto-creates:
+
+```text
+~/.claude/projects/-grok-codex-transfer/grok-transfer-<sessionId>.jsonl
+```
+
+That folder is only a **temporary staging area** for Codex's import ledger. It is not dual-host support and does not require a Claude account or Claude CLI.
 
 ```bash
 /codex:transfer
@@ -155,11 +167,24 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 
 | Area | Behavior |
 |------|----------|
+| Host | **Grok Build only** (no Claude Code dual-host) |
 | Plugin env | `GROK_PLUGIN_ROOT` / `GROK_PLUGIN_DATA` / `GROK_SESSION_ID` |
-| Tools in commands | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
-| Background work | Prefer Grok shell `background: true` (has completion callbacks). Avoid relying only on companion `--background` detached workers for agent orchestration |
-| Session transfer | Grok chat history auto-converted before Codex external import |
+| Hook envelopes | Grok camelCase (`sessionId`, `lastAssistantMessage`, `hookEventName`) |
+| Tools in commands/skills | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
+| Slash entrypoints | `commands/` + Grok-native `skills/<name>/SKILL.md` |
+| Background work | Prefer Grok shell `background: true` (completion callbacks). Companion `--background` still works for job status/result |
+| Session transfer | Source = Grok sessions; staging under `~/.claude/projects/-grok-codex-transfer/` for Codex import only (auto-created; **no Claude install**) |
 | Marketplace layout | `.grok-plugin/marketplace.json` only |
+
+### Pure Grok machine checklist
+
+| Need | Required? |
+|------|-----------|
+| Grok Build | Yes |
+| Codex CLI + login/provider | Yes |
+| This plugin | Yes |
+| Claude Code app / Claude account | **No** |
+| Pre-existing `~/.claude` | **No** (transfer creates the staging dir if needed) |
 
 ## Direct CLI (without slash commands)
 

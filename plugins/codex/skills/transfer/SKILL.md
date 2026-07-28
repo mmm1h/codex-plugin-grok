@@ -13,4 +13,5 @@ Present the command output to the user exactly as returned. Preserve the Codex s
 
 Notes:
 - Grok sessions under `~/.grok/sessions/**/chat_history.jsonl` are converted to Codex-importable turns automatically.
+- Staging for Codex import is written under `~/.claude/projects/-grok-codex-transfer/` (auto-created). That path is a Codex CLI convention, not a Claude Code requirement — pure Grok machines work without installing Claude.
 - Prefer the SessionStart hook's auto-detected transcript; use `--source` only as a manual override.

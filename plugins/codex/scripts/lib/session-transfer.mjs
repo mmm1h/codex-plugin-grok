@@ -191,12 +191,15 @@ export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
 }
 
 /**
- * Codex externalAgentConfig/import only records sessions that live under the
- * Claude Code projects tree (~/.claude/projects). Grok chat_history is converted
- * into Claude-compatible JSONL and staged there as an import shim (not dual-host
- * support — Claude users should use openai/codex-plugin-cc).
+ * Codex externalAgentConfig/import only records sessions under the historical
+ * Claude Code projects tree (~/.claude/projects). That is a Codex CLI path
+ * convention — Claude Code does NOT need to be installed.
+ *
+ * Grok chat_history is converted to the JSONL shape Codex expects and staged
+ * under ~/.claude/projects/-grok-codex-transfer/ (created on demand).
+ * Pure Grok machines work; this is not dual-host support.
  */
-function resolveClaudeProjectsImportDir() {
+function resolveCodexImportStagingDir() {
   const home = firstDefinedHome();
   return path.join(home, ".claude", "projects", "-grok-codex-transfer");
 }
@@ -223,8 +226,8 @@ function materializeGrokImportSource(sourcePath, cwd) {
   }
 
   const converted = convertGrokChatHistoryToClaudeJsonl(sourcePath, { cwd, title });
-  // Stage under Claude projects so Codex import ledger accepts the session.
-  const importDir = resolveClaudeProjectsImportDir();
+  // Stage under Codex's expected import tree (auto-create; no Claude app required).
+  const importDir = resolveCodexImportStagingDir();
   fs.mkdirSync(importDir, { recursive: true });
   const safeId = String(sessionId).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "session";
   const outPath = path.join(importDir, `grok-transfer-${safeId}.jsonl`);
