@@ -68,6 +68,10 @@ test("sync-installed defaults to dry-run and apply mirrors managed trees while p
     name: "codex",
     version: "legacy"
   });
+  writeJson(path.join(installedDir, ".grok-plugin", "plugin.json"), {
+    name: "codex",
+    version: "duplicate"
+  });
   makeRegistry(grokHome, installedDir, sourceDir);
 
   const dryRun = run(process.execPath, [SCRIPT, "--source", sourceDir, "--grok-home", grokHome]);
@@ -96,6 +100,7 @@ test("sync-installed defaults to dry-run and apply mirrors managed trees while p
   assert.equal(fs.existsSync(path.join(installedDir, ".generated", "dev-only.ts")), false);
   assert.equal(fs.existsSync(path.join(installedDir, ".generated")), false);
   assert.equal(fs.existsSync(path.join(installedDir, ".claude-plugin")), false);
+  assert.equal(fs.existsSync(path.join(installedDir, ".grok-plugin")), false);
   assert.equal(fs.readFileSync(path.join(installedDir, "local-state.json"), "utf8"), "keep me\n");
 });
 

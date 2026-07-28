@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
 import {
+  isUsingFallbackStateDir,
   loadState,
   reconcileStaleJobs,
   resolveJobFile,
@@ -22,11 +23,20 @@ import {
 
 test("resolveStateDir uses a temp-backed per-workspace directory", () => {
   const workspace = makeTempDir();
-  const stateDir = resolveStateDir(workspace);
+  const previousPluginDataDir = process.env.GROK_PLUGIN_DATA;
+  delete process.env.GROK_PLUGIN_DATA;
 
-  assert.equal(stateDir.startsWith(os.tmpdir()), true);
-  assert.match(path.basename(stateDir), /.+-[a-f0-9]{16}$/);
-  assert.match(stateDir, new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  try {
+    const stateDir = resolveStateDir(workspace);
+    assert.equal(isUsingFallbackStateDir(), true);
+    assert.equal(stateDir.startsWith(os.tmpdir()), true);
+    assert.match(path.basename(stateDir), /.+-[a-f0-9]{16}$/);
+    assert.match(stateDir, new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    if (previousPluginDataDir != null) {
+      process.env.GROK_PLUGIN_DATA = previousPluginDataDir;
+    }
+  }
 });
 
 test("resolveStateDir uses GROK_PLUGIN_DATA when it is provided", () => {
@@ -38,6 +48,7 @@ test("resolveStateDir uses GROK_PLUGIN_DATA when it is provided", () => {
   try {
     const stateDir = resolveStateDir(workspace);
 
+    assert.equal(isUsingFallbackStateDir(), false);
     assert.equal(stateDir.startsWith(path.join(pluginDataDir, "state")), true);
     assert.match(path.basename(stateDir), /.+-[a-f0-9]{16}$/);
   } finally {

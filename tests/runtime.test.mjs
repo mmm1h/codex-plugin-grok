@@ -31,10 +31,12 @@ async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 50 } = {}) {
 test("setup reports ready when fake codex is installed and authenticated", () => {
   const binDir = makeTempDir();
   installFakeCodex(binDir);
+  const env = buildEnv(binDir);
+  delete env.GROK_PLUGIN_DATA;
 
   const result = run("node", [SCRIPT, "setup", "--json"], {
     cwd: ROOT,
-    env: buildEnv(binDir)
+    env
   });
 
   assert.equal(result.status, 0);
@@ -42,6 +44,27 @@ test("setup reports ready when fake codex is installed and authenticated", () =>
   assert.equal(payload.ready, true);
   assert.match(payload.codex.detail, /advanced runtime available/);
   assert.equal(payload.sessionRuntime.mode, "direct");
+  assert.equal(path.isAbsolute(payload.stateDir), true);
+  assert.equal(payload.usingFallbackStateDir, true);
+});
+
+test("setup reports GROK_PLUGIN_DATA state without a fallback warning flag", () => {
+  const binDir = makeTempDir();
+  const pluginDataDir = makeTempDir("grok-plugin-data-");
+  installFakeCodex(binDir);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      GROK_PLUGIN_DATA: pluginDataDir
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.usingFallbackStateDir, false);
+  assert.equal(payload.stateDir.startsWith(path.join(pluginDataDir, "state")), true);
 });
 
 test("setup is ready without npm when Codex is already installed and authenticated", () => {
@@ -314,6 +337,9 @@ test("transfer fails visibly when native import completes without a ledger recor
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /did not record an imported thread/);
+  assert.match(result.stderr, /Staging path:/);
+  assert.match(result.stderr, /Ledger path:/);
+  assert.match(result.stderr, /CODEX_TRANSFER_STAGING_DIR/);
 });
 
 test("transfer rejects sources outside Grok sessions directories", () => {

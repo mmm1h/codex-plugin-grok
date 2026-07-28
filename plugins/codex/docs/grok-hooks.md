@@ -70,6 +70,8 @@ Minimal fixture:
 
 ### Stop
 
+The host starts one Node process for this hook after every turn, including when the review gate is disabled. This is inherent hook dispatch overhead. With the gate disabled, the process performs only a lightweight state check and returns immediately. To avoid that process startup cost entirely, remove the Stop hook registration in the host.
+
 The Stop hook first applies `shouldRunStopReview(input)`:
 
 - missing/empty `reason` or `reason: "end_turn"`: normal end-of-turn path; inspect current-session jobs and run the review gate when enabled.

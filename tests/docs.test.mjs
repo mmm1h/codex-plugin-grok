@@ -33,5 +33,7 @@ test("Grok hook contract documents the fields and timing implemented by hook res
   assert.match(docs, /observe-only session-close/);
   assert.match(docs, /13 minutes/);
   assert.match(docs, /900 seconds/);
+  assert.match(docs, /one Node process.*after every turn/i);
+  assert.match(docs, /remove the Stop hook registration/i);
   assert.match(docs, /~\/\.grok\/sessions\/<encodeURIComponent\(path\.resolve\(cwd\)\)>\/<sessionId>\/chat_history\.jsonl/);
 });

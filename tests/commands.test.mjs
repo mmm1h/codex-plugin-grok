@@ -180,10 +180,11 @@ test("setup command can offer Codex install and still points users to codex logi
   assert.match(readme, /\/codex:setup --disable-review-gate/);
 });
 
-test("marketplace Grok manifest exists (no Claude dual-host)", () => {
+test("Grok uses one root plugin manifest (no Claude dual-host)", () => {
   assert.equal(fs.existsSync(path.join(ROOT, ".grok-plugin", "marketplace.json")), true);
   assert.equal(fs.existsSync(path.join(ROOT, ".claude-plugin", "marketplace.json")), false);
-  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".grok-plugin", "plugin.json")), true);
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, "plugin.json")), true);
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".grok-plugin", "plugin.json")), false);
   assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, ".claude-plugin", "plugin.json")), false);
   const marketplace = JSON.parse(fs.readFileSync(path.join(ROOT, ".grok-plugin", "marketplace.json"), "utf8"));
   assert.equal(marketplace.plugins[0].name, "codex");

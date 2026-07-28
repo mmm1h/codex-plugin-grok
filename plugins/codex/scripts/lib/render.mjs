@@ -186,9 +186,17 @@ export function renderSetupReport(report) {
     `- codex: ${report.codex.detail}`,
     `- auth: ${report.auth.detail}`,
     `- session runtime: ${report.sessionRuntime.label}`,
+    `- state directory: ${report.stateDir}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     ""
   ];
+
+  if (report.usingFallbackStateDir) {
+    lines.push(
+      "Warning: state is stored in the system temporary directory and may be removed by the system, causing Codex job records to be lost.",
+      ""
+    );
+  }
 
   if (report.actionsTaken.length > 0) {
     lines.push("Actions taken:");

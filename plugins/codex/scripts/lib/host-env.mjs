@@ -182,21 +182,16 @@ export function appendHostEnvVar(name, value) {
  * Resolve plugin.json for the Grok plugin layout.
  */
 export function resolvePluginManifestUrl(importMetaUrl) {
-  const candidates = [
-    new URL("../../.grok-plugin/plugin.json", importMetaUrl),
-    new URL("../../plugin.json", importMetaUrl)
-  ];
-  for (const url of candidates) {
-    try {
-      const filePath = fileURLToPath(url);
-      if (fs.existsSync(filePath)) {
-        return { url, path: filePath };
-      }
-    } catch {
-      // keep looking
+  const url = new URL("../../plugin.json", importMetaUrl);
+  try {
+    const filePath = fileURLToPath(url);
+    if (fs.existsSync(filePath)) {
+      return { url, path: filePath };
     }
+  } catch {
+    // Report the canonical URL with a null path when it cannot be resolved.
   }
-  return { url: candidates[0], path: null };
+  return { url, path: null };
 }
 
 /** @deprecated Use GROK_PLUGIN_ROOT_EXPR */

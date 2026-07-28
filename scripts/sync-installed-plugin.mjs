@@ -10,7 +10,6 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const ORIGIN_MARKER = /codex-plugin-grok/i;
 const PLUGIN_PAYLOAD_ROOTS = new Set([
-  ".grok-plugin",
   ".lsp.json",
   ".mcp.json",
   "CHANGELOG.md",
@@ -26,7 +25,7 @@ const PLUGIN_PAYLOAD_ROOTS = new Set([
   "scripts",
   "skills"
 ]);
-const TARGET_PRUNE_ROOTS = new Set([".claude-plugin", ".generated"]);
+const TARGET_PRUNE_ROOTS = new Set([".claude-plugin", ".generated", ".grok-plugin"]);
 
 function usage() {
   return [

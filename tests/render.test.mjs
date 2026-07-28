@@ -1,7 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderReviewResult, renderStoredJobResult } from "../plugins/codex/scripts/lib/render.mjs";
+import {
+  renderReviewResult,
+  renderSetupReport,
+  renderStoredJobResult
+} from "../plugins/codex/scripts/lib/render.mjs";
+
+test("renderSetupReport shows the state directory and fallback warning", () => {
+  const output = renderSetupReport({
+    ready: true,
+    node: { detail: "node ok" },
+    npm: { detail: "npm ok" },
+    codex: { detail: "codex ok" },
+    auth: { detail: "auth ok" },
+    sessionRuntime: { label: "direct" },
+    stateDir: "C:\\Temp\\codex-companion\\repo-1234",
+    usingFallbackStateDir: true,
+    reviewGateEnabled: false,
+    actionsTaken: [],
+    nextSteps: []
+  });
+
+  assert.match(output, /state directory: C:\\Temp\\codex-companion\\repo-1234/);
+  assert.match(output, /system temporary directory/i);
+  assert.match(output, /job records to be lost/i);
+});
 
 test("renderReviewResult degrades gracefully when JSON is missing required review fields", () => {
   const output = renderReviewResult(

@@ -39,18 +39,6 @@ const TARGETS = [
     ]
   },
   {
-    file: "plugins/codex/.grok-plugin/plugin.json",
-    values: [
-      {
-        label: "version",
-        get: (json) => json.version,
-        set: (json, version) => {
-          json.version = version;
-        }
-      }
-    ]
-  },
-  {
     file: "plugins/codex/plugin.json",
     values: [
       {

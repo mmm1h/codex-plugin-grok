@@ -654,6 +654,10 @@ function resolveCodexHome() {
   return path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"));
 }
 
+export function resolveExternalAgentImportLedgerPath() {
+  return path.join(resolveCodexHome(), "external_agent_session_imports.json");
+}
+
 function sourceContentSha256(sourcePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex");
 }
@@ -682,7 +686,7 @@ export function normalizeLedgerPath(filePath) {
 }
 
 function importedThreadIdForSource(sourcePath) {
-  const ledgerPath = path.join(resolveCodexHome(), "external_agent_session_imports.json");
+  const ledgerPath = resolveExternalAgentImportLedgerPath();
   if (!fs.existsSync(ledgerPath)) {
     return null;
   }
@@ -1126,8 +1130,15 @@ export async function importExternalAgentSession(cwd, options = {}) {
     const threadId = importedThreadIdForSource(options.sourcePath);
     if (!threadId) {
       const stderr = cleanCodexStderr(client.stderr);
+      const stagingPath = path.dirname(path.resolve(options.sourcePath));
+      const ledgerPath = resolveExternalAgentImportLedgerPath();
       throw new Error(
-        `Codex reported that the host session import completed, but did not record an imported thread.${stderr ? `\n${stderr}` : " Check the Codex app-server logs for the underlying import error."}`
+        [
+          `Codex reported that the host session import completed, but did not record an imported thread.${stderr ? `\n${stderr}` : " Check the Codex app-server logs for the underlying import error."}`,
+          `Staging path: ${stagingPath}`,
+          `Ledger path: ${ledgerPath}`,
+          "If this Codex version changed its import convention, set CODEX_TRANSFER_STAGING_DIR to a compatible staging directory."
+        ].join("\n")
       );
     }
     emitProgress(options.onProgress, `Host session imported (${threadId}).`, "completed", { threadId });

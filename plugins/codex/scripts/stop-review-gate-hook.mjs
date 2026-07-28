@@ -9,7 +9,7 @@ import { getCodexAvailability } from "./lib/codex.mjs";
 import { readStdinJson } from "./lib/fs.mjs";
 import { terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
-import { getConfig, listJobs, reconcileStaleJobs } from "./lib/state.mjs";
+import { loadState, reconcileStaleJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
 import { SESSION_ID_ENV } from "./lib/tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -214,16 +214,20 @@ async function main() {
   }
   const cwd = resolveHookCwd(input);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
-  reconcileStaleJobs(workspaceRoot);
-  const config = getConfig(workspaceRoot);
-
-  const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(listJobs(workspaceRoot), input));
+  let state = loadState(workspaceRoot);
+  let jobs = filterJobsForCurrentSession(state.jobs, input);
+  if (jobs.some((job) => job.status === "queued" || job.status === "running")) {
+    reconcileStaleJobs(workspaceRoot);
+    state = loadState(workspaceRoot);
+    jobs = filterJobsForCurrentSession(state.jobs, input);
+  }
+  jobs = sortJobsNewestFirst(jobs);
   const runningJob = jobs.find((job) => job.status === "queued" || job.status === "running");
   const runningTaskNote = runningJob
     ? `Codex task ${runningJob.id} is still running. Check /codex:status and use /codex:cancel ${runningJob.id} if you want to stop it before ending the session.`
     : null;
 
-  if (!config.stopReviewGate) {
+  if (!state.config.stopReviewGate) {
     logNote(runningTaskNote);
     return;
   }

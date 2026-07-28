@@ -21,8 +21,12 @@ const STALE_JOB_ERROR_MESSAGE =
   "Codex job process is no longer running (orphaned); marked stale.";
 const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
-function resolvePluginDataDir() {
-  return process.env.GROK_PLUGIN_DATA || null;
+function resolvePluginDataDir(env = process.env) {
+  return env?.GROK_PLUGIN_DATA || null;
+}
+
+export function isUsingFallbackStateDir(env = process.env) {
+  return !resolvePluginDataDir(env);
 }
 
 function nowIso() {

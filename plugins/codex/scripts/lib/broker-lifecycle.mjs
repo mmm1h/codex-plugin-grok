@@ -10,6 +10,8 @@ import { resolveStateDir } from "./state.mjs";
 
 export const PID_FILE_ENV = "CODEX_COMPANION_APP_SERVER_PID_FILE";
 export const LOG_FILE_ENV = "CODEX_COMPANION_APP_SERVER_LOG_FILE";
+export const BROKER_STARTUP_TIMEOUT_ENV = "CODEX_BROKER_STARTUP_TIMEOUT_MS";
+export const DEFAULT_BROKER_STARTUP_TIMEOUT_MS = 5000;
 const BROKER_STATE_FILE = "broker.json";
 
 export function createBrokerSessionDir(prefix = "cxc-") {
@@ -21,7 +23,7 @@ function connectToEndpoint(endpoint) {
   return net.createConnection({ path: target.path });
 }
 
-export async function waitForBrokerEndpoint(endpoint, timeoutMs = 2000) {
+export async function waitForBrokerEndpoint(endpoint, timeoutMs = DEFAULT_BROKER_STARTUP_TIMEOUT_MS) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const ready = await new Promise((resolve) => {
@@ -38,6 +40,14 @@ export async function waitForBrokerEndpoint(endpoint, timeoutMs = 2000) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return false;
+}
+
+export function resolveBrokerStartupTimeoutMs(env = process.env) {
+  const configured = Number(env?.[BROKER_STARTUP_TIMEOUT_ENV]);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_BROKER_STARTUP_TIMEOUT_MS;
 }
 
 export async function sendBrokerShutdown(endpoint) {
@@ -146,7 +156,10 @@ export async function ensureBrokerSession(cwd, options = {}) {
     env: options.env ?? process.env
   });
 
-  const ready = await waitForBrokerEndpoint(endpoint, options.timeoutMs ?? 2000);
+  const ready = await waitForBrokerEndpoint(
+    endpoint,
+    options.timeoutMs ?? resolveBrokerStartupTimeoutMs(options.env ?? process.env)
+  );
   if (!ready) {
     teardownBrokerSession({
       endpoint,
@@ -154,8 +167,12 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile,
       sessionDir,
       pid: child.pid ?? null,
-      killProcess: options.killProcess ?? null
+      killProcess: options.killProcess ?? null,
+      preserveLog: true
     });
+    process.stderr.write(
+      `Warning: Codex broker did not become ready; diagnostics remain at ${path.resolve(logFile)}. Falling back to direct startup.\n`
+    );
     return null;
   }
 
@@ -170,7 +187,15 @@ export async function ensureBrokerSession(cwd, options = {}) {
   return session;
 }
 
-export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessionDir = null, pid = null, killProcess = null }) {
+export function teardownBrokerSession({
+  endpoint = null,
+  pidFile,
+  logFile,
+  sessionDir = null,
+  pid = null,
+  killProcess = null,
+  preserveLog = false
+}) {
   if (Number.isFinite(pid) && killProcess) {
     try {
       killProcess(pid);
@@ -183,7 +208,7 @@ export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessi
     fs.unlinkSync(pidFile);
   }
 
-  if (logFile && fs.existsSync(logFile)) {
+  if (!preserveLog && logFile && fs.existsSync(logFile)) {
     fs.unlinkSync(logFile);
   }
 
@@ -199,11 +224,11 @@ export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessi
   }
 
   const resolvedSessionDir = sessionDir ?? (pidFile ? path.dirname(pidFile) : logFile ? path.dirname(logFile) : null);
-  if (resolvedSessionDir && fs.existsSync(resolvedSessionDir)) {
+  if (!preserveLog && resolvedSessionDir && fs.existsSync(resolvedSessionDir)) {
     try {
-      fs.rmdirSync(resolvedSessionDir);
+      fs.rmSync(resolvedSessionDir, { recursive: true, force: true });
     } catch {
-      // Ignore non-empty or missing directories.
+      // Ignore already-removed or temporarily locked session directories.
     }
   }
 }

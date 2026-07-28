@@ -6,9 +6,13 @@ import { ensureAbsolutePath } from "./fs.mjs";
 import { encodeGrokSessionGroup, resolveGrokHome } from "./host-env.mjs";
 
 export const TRANSCRIPT_PATH_ENV = "CODEX_COMPANION_TRANSCRIPT_PATH";
+export const TRANSFER_STAGING_DIR_ENV = "CODEX_TRANSFER_STAGING_DIR";
 
 /** Max characters retained per tool result body in converted transcripts. */
 const TOOL_RESULT_MAX_CHARS = 4000;
+const TRANSFER_STAGING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const TRANSFER_STAGING_MAX_FILES = 20;
+const TRANSFER_FILE_PATTERN = /^grok-transfer-.*\.jsonl$/;
 
 function resolveUserPath(cwd, value) {
   if (value === "~") {
@@ -187,17 +191,61 @@ export function convertGrokChatHistoryToImportJsonl(sourcePath, options = {}) {
 }
 
 /**
- * Codex externalAgentConfig/import only records sessions under the historical
- * Claude Code projects tree (~/.claude/projects). That is a Codex CLI path
- * convention — Claude Code does NOT need to be installed.
+ * Codex 0.145.0 externalAgentConfig/import records sessions only under the
+ * historical Claude Code projects tree (~/.claude/projects). That is a Codex
+ * CLI path convention — Claude Code does NOT need to be installed.
  *
  * Grok chat_history is converted to the JSONL shape Codex expects and staged
  * under ~/.claude/projects/-grok-codex-transfer/ (created on demand).
  * Pure Grok machines work; this is not dual-host support.
  */
-function resolveCodexImportStagingDir() {
+export function resolveCodexImportStagingDir(env = process.env) {
+  const configured = String(env?.[TRANSFER_STAGING_DIR_ENV] ?? "").trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
   const home = firstDefinedHome();
   return path.join(home, ".claude", "projects", "-grok-codex-transfer");
+}
+
+export function cleanupCodexImportStagingDir(stagingDir, options = {}) {
+  const fsImpl = options.fsImpl ?? fs;
+  const now = Number(options.now ?? Date.now());
+
+  try {
+    const files = fsImpl
+      .readdirSync(stagingDir)
+      .filter((name) => TRANSFER_FILE_PATTERN.test(name))
+      .map((name) => {
+        const filePath = path.join(stagingDir, name);
+        try {
+          return {
+            name,
+            filePath,
+            mtimeMs: fsImpl.statSync(filePath).mtimeMs
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.mtimeMs - left.mtimeMs || left.name.localeCompare(right.name));
+
+    for (const [index, file] of files.entries()) {
+      const expired = now - file.mtimeMs > TRANSFER_STAGING_MAX_AGE_MS;
+      const overLimit = index >= TRANSFER_STAGING_MAX_FILES;
+      if (!expired && !overLimit) {
+        continue;
+      }
+      try {
+        fsImpl.unlinkSync(file.filePath);
+      } catch {
+        // Staging cleanup is best effort and must never fail a completed transfer.
+      }
+    }
+  } catch {
+    // Missing, unreadable, or concurrently removed staging directories are harmless.
+  }
 }
 
 function firstDefinedHome() {

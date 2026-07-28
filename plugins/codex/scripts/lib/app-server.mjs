@@ -24,19 +24,14 @@ import {
 import { resolveCommandInvocation, terminateProcessTree } from "./process.mjs";
 
 function loadPluginManifest() {
-  const candidates = [
-    new URL("../../.grok-plugin/plugin.json", import.meta.url),
-    new URL("../../plugin.json", import.meta.url)
-  ];
-  for (const url of candidates) {
-    try {
-      const filePath = fileURLToPath(url);
-      if (fs.existsSync(filePath)) {
-        return JSON.parse(fs.readFileSync(filePath, "utf8"));
-      }
-    } catch {
-      // continue
+  const url = new URL("../../plugin.json", import.meta.url);
+  try {
+    const filePath = fileURLToPath(url);
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, "utf8"));
     }
+  } catch {
+    // Fall back to an unknown version when the installed manifest is unreadable.
   }
   return { version: "0.0.0" };
 }

@@ -189,7 +189,8 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 | Tools in commands/skills | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
 | Slash entrypoints | `commands/` + Grok-native `skills/<name>/SKILL.md` |
 | Background work | Slash review/rescue flows use Grok shell `background: true` for completion callbacks. Direct `task --background` is detached and must be checked with status/result |
-| Session transfer | Source = Grok sessions; staging under `~/.claude/projects/-grok-codex-transfer/` for Codex import only (auto-created; **no Claude install**) |
+| Session transfer | Source = Grok sessions; defaults to `~/.claude/projects/-grok-codex-transfer/` for the Codex 0.145.0 import convention, with `CODEX_TRANSFER_STAGING_DIR` available for compatible overrides |
+| Plugin manifest | `plugins/codex/plugin.json` is the single root manifest read by Grok CLI |
 | Marketplace layout | `.grok-plugin/marketplace.json` only |
 
 The exact environment, stdin fields, event behavior, transcript layout, and Stop timeout contract are documented in [Grok hook contract](plugins/codex/docs/grok-hooks.md). In particular, production envelopes use Grok camelCase; `hook_event_name` and `session_id` are not recognized.

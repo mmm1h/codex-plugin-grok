@@ -21,7 +21,10 @@ import {
     runAppServerReview,
     runAppServerTurn
   } from "./lib/codex.mjs";
-import { resolveSessionTransferSource } from "./lib/session-transfer.mjs";
+import {
+  cleanupCodexImportStagingDir,
+  resolveSessionTransferSource
+} from "./lib/session-transfer.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
@@ -33,8 +36,10 @@ import {
 import {
   generateJobId,
   getConfig,
+  isUsingFallbackStateDir,
   listJobs,
   reconcileStaleJobs,
+  resolveStateDir,
   setConfig,
   upsertJob,
   writeJobFile
@@ -220,6 +225,8 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     codex: codexStatus,
     auth: authStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
+    stateDir: resolveStateDir(workspaceRoot),
+    usingFallbackStateDir: isUsingFallbackStateDir(),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
     nextSteps
@@ -653,6 +660,7 @@ async function executeTransfer(cwd, options = {}) {
     source: options.source
   });
   const result = await importExternalAgentSession(cwd, { sourcePath: transfer.importPath });
+  cleanupCodexImportStagingDir(path.dirname(transfer.importPath));
   const sessionId =
     transfer.host === "grok"
       ? path.basename(path.dirname(transfer.sourcePath))

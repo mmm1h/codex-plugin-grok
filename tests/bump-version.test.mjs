@@ -36,10 +36,6 @@ function makeVersionFixture() {
       }
     }
   });
-  writeJson(path.join(root, "plugins", "codex", ".grok-plugin", "plugin.json"), {
-    name: "codex",
-    version: "1.0.2"
-  });
   writeJson(path.join(root, "plugins", "codex", "plugin.json"), {
     name: "codex",
     version: "1.0.2"
@@ -70,7 +66,6 @@ test("bump-version updates every release manifest", () => {
   assert.equal(readJson(path.join(root, "package.json")).version, "1.2.3");
   assert.equal(readJson(path.join(root, "package-lock.json")).version, "1.2.3");
   assert.equal(readJson(path.join(root, "package-lock.json")).packages[""].version, "1.2.3");
-  assert.equal(readJson(path.join(root, "plugins", "codex", ".grok-plugin", "plugin.json")).version, "1.2.3");
   assert.equal(readJson(path.join(root, "plugins", "codex", "plugin.json")).version, "1.2.3");
   assert.equal(readJson(path.join(root, ".grok-plugin", "marketplace.json")).metadata.version, "1.2.3");
   assert.equal(readJson(path.join(root, ".grok-plugin", "marketplace.json")).plugins[0].version, "1.2.3");
@@ -88,6 +83,6 @@ test("bump-version check mode reports stale metadata", () => {
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /plugins\/codex\/\.grok-plugin\/plugin\.json version|plugins\\codex\\\.grok-plugin\\plugin\.json version/);
+  assert.match(result.stderr, /plugins\/codex\/plugin\.json version|plugins\\codex\\plugin\.json version/);
   assert.match(result.stderr, /\.grok-plugin\/marketplace\.json metadata\.version|\.grok-plugin\\marketplace\.json metadata\.version/);
 });
