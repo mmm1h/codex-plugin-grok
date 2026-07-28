@@ -194,3 +194,13 @@ test("slash commands are exposed as Grok-native skills", () => {
     assert.match(source, /GROK_PLUGIN_ROOT/);
   }
 });
+
+test("Windows invoke-codex helper ships and avoids bash stdin redirection", () => {
+  const helper = path.join(PLUGIN_ROOT, "scripts", "invoke-codex.ps1");
+  assert.equal(fs.existsSync(helper), true);
+  const source = fs.readFileSync(helper, "utf8");
+  assert.match(source, /Get-Content\s+-Raw/);
+  assert.match(source, /tmp\/codex-out|tmp\\codex-out|Join-Path.*tmp/);
+  assert.doesNotMatch(source, /codex exec[^\n]*<\s/);
+  assert.match(source, /PromptFile/);
+});

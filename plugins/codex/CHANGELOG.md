@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1-grok
+
+- Portable Windows launcher: `scripts/invoke-codex.ps1` (pipe stdin, repo-local `tmp/codex-out`, no machine-hardcoded paths)
+- Docs: pure-Grok FAQ, PowerShell `<` redirection pitfall, portable out-dir guidance
+- Naming scrub: session scoping / import convert helpers use Grok-Codex terminology
+
 ## 1.1.0-grok
 
 - Grok-only fork of openai/codex-plugin-cc (Claude Code users should use the official plugin)

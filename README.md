@@ -214,7 +214,17 @@ node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the fai
 codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
 ```
 
-**Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Feed long prompts with a pipe. Prefer a **portable** output dir (e.g. `<repo>/tmp/codex-out/`), not a machine-local path like `D:\Cache\...`:
+**Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Prefer a **portable** output dir (`<repo>/tmp/codex-out/`), not a machine-local path.
+
+Bundled helper (recommended on Windows):
+
+```powershell
+# From the installed/plugin scripts directory, or a checkout of this repo:
+pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "fix the failing test" -Effort medium
+pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -PromptFile <repo>/tmp/codex-out/spec.md -OutName job.md -Effort high
+```
+
+Or pipe manually:
 
 ```powershell
 $out = Join-Path <repo> "tmp/codex-out"
