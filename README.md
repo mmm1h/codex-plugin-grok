@@ -227,7 +227,7 @@ That flag enables Claude-compat skill loading for plugin slash entries; it is no
 
 **Q: `grok inspect` resolves `codex` from `~/.claude/plugins/...` instead of `~/.grok/installed-plugins/...`?**
 
-A: The official plugin and this fork both use the `codex` name to provide the `/codex:*` namespace, and Grok deduplicates same-name plugins. They are not intended to coexist in Grok discovery. Remove or disable the legacy official plugin for Grok, run `grok plugin update codex`, reload, and verify the selected path with `grok inspect --json`.
+A: The official Claude Code plugin and this fork both use the `codex` name to provide the `/codex:*` namespace, and Grok gives the Claude-compatible source priority when it deduplicates same-name plugins. They cannot coexist in Grok discovery. Check the conflicting install with `claude plugin list`, then disable it with `claude plugin disable codex@openai-codex` (add `--scope user`, `--scope project`, or `--scope local` to match its listed scope) or uninstall it if it is no longer needed. Next run `grok plugin update codex`, reload plugins (`r` in the Plugins tab) or start a new session, and verify that `grok inspect --json` selects a path under `~/.grok/installed-plugins/`. Keeping the official plugin enabled for Claude Code will continue to shadow this fork in Grok.
 
 ## Direct CLI (without slash commands)
 
@@ -250,10 +250,10 @@ Bundled helper (recommended on Windows):
 pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "fix the failing test" -Effort medium
 pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -PromptFile <repo>/tmp/codex-out/spec.md -OutName job.md -Effort high
 # Optional only when that named Codex profile exists:
-pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "review" -Profile codex-api
+pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "review" -CodexProfile codex-api
 ```
 
-The helper preserves Codex's configured reasoning effort unless `-Effort` is supplied explicitly. `-Profile` (an alias for `-CodexProfile`) adds the named profile only when supplied. It prefers the npm `codex.cmd` shim on Windows so PowerShell execution policy does not block `codex.ps1`.
+The helper preserves Codex's configured reasoning effort unless `-Effort` is supplied explicitly. `-CodexProfile` (`-Profile` remains an alias) adds the named profile only when supplied. It prefers the npm `codex.cmd` shim on Windows so PowerShell execution policy does not block `codex.ps1`.
 
 Or pipe manually:
 
