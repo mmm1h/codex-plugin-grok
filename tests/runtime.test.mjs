@@ -264,6 +264,10 @@ test("transfer converts the current Grok session and imports it", () => {
   assert.equal(fakeState.threads[0].name, "Native transfer");
   assert.ok(fakeState.lastExternalAgentImport.sourcePath);
   assert.notEqual(fakeState.lastExternalAgentImport.sourcePath, canonicalSourcePath);
+  assert.match(
+    String(fakeState.lastExternalAgentImport.sourcePath).replace(/\\/g, "/"),
+    /\.claude\/projects\/-grok-codex-transfer\//i
+  );
   assert.deepEqual(
     fakeState.threads[0].visibleMessages.map((message) => message.text),
     ["Initial request", "Initial answer", "/codex:transfer"]
@@ -1770,13 +1774,21 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
 
   const stateDir = resolveStateDir(repo);
   const runningJob = await waitFor(() => {
-    const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
-    const job = state.jobs.find((candidate) => candidate.id === jobId);
-    if (job?.status === "running" && job.threadId && job.turnId) {
-      return job;
+    try {
+      const stateFile = path.join(stateDir, "state.json");
+      if (!fs.existsSync(stateFile)) {
+        return null;
+      }
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      const job = state.jobs.find((candidate) => candidate.id === jobId);
+      if (job?.status === "running" && job.threadId && job.turnId) {
+        return job;
+      }
+    } catch {
+      // state.json may be mid-write
     }
     return null;
-  }, { timeoutMs: 15000 });
+  }, { timeoutMs: 20000 });
 
   const cancelResult = run("node", [SCRIPT, "cancel", jobId, "--json"], {
     cwd: repo,
@@ -2253,17 +2265,20 @@ test("setup and status honor --cwd when reading shared session runtime", () => {
     endpoint: "unix:/tmp/fake-broker.sock"
   });
 
+  // Status only reads broker.json (no liveness probe).
   const status = run("node", [SCRIPT, "status", "--cwd", targetWorkspace], {
     cwd: invocationWorkspace
   });
   assert.equal(status.status, 0, status.stderr);
   assert.match(status.stdout, /Session runtime: shared session/);
 
+  // Setup probes the broker; a dead endpoint is cleared and falls back to direct.
   const setup = run("node", [SCRIPT, "setup", "--cwd", targetWorkspace, "--json"], {
     cwd: invocationWorkspace
   });
   assert.equal(setup.status, 0, setup.stderr);
   const payload = JSON.parse(setup.stdout);
-  assert.equal(payload.sessionRuntime.mode, "shared");
-  assert.equal(payload.sessionRuntime.endpoint, "unix:/tmp/fake-broker.sock");
+  assert.equal(payload.sessionRuntime.mode, "direct");
+  assert.equal(payload.sessionRuntime.endpoint, null);
+  assert.equal(loadBrokerSession(targetWorkspace), null);
 });

@@ -190,7 +190,28 @@ export function convertGrokChatHistoryToClaudeJsonl(sourcePath, options = {}) {
   return `${out.map((row) => JSON.stringify(row)).join("\n")}\n`;
 }
 
-function materializeGrokImportSource(sourcePath, cwd, cacheDir) {
+/**
+ * Codex externalAgentConfig/import only records sessions that live under the
+ * Claude Code projects tree (~/.claude/projects). Grok chat_history is converted
+ * into Claude-compatible JSONL and staged there as an import shim (not dual-host
+ * support — Claude users should use openai/codex-plugin-cc).
+ */
+function resolveClaudeProjectsImportDir() {
+  const home = firstDefinedHome();
+  return path.join(home, ".claude", "projects", "-grok-codex-transfer");
+}
+
+function firstDefinedHome() {
+  for (const name of ["HOME", "USERPROFILE"]) {
+    const value = process.env[name];
+    if (value != null && String(value).trim() !== "") {
+      return String(value);
+    }
+  }
+  return os.homedir();
+}
+
+function materializeGrokImportSource(sourcePath, cwd) {
   const sessionDir = path.dirname(sourcePath);
   const sessionId = path.basename(sessionDir);
   let title = sessionId;
@@ -202,8 +223,11 @@ function materializeGrokImportSource(sourcePath, cwd, cacheDir) {
   }
 
   const converted = convertGrokChatHistoryToClaudeJsonl(sourcePath, { cwd, title });
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const outPath = path.join(cacheDir, `grok-transfer-${sessionId}.jsonl`);
+  // Stage under Claude projects so Codex import ledger accepts the session.
+  const importDir = resolveClaudeProjectsImportDir();
+  fs.mkdirSync(importDir, { recursive: true });
+  const safeId = String(sessionId).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "session";
+  const outPath = path.join(importDir, `grok-transfer-${safeId}.jsonl`);
   fs.writeFileSync(outPath, converted, "utf8");
   return outPath;
 }
@@ -270,12 +294,7 @@ export function resolveSessionTransferSource(cwd, options = {}) {
   }
 
   const resolved = resolveGrokSessionPathStrict(realSource);
-  const cacheDir = path.join(
-    process.env.GROK_PLUGIN_DATA || os.tmpdir(),
-    "codex-companion",
-    "transfer-cache"
-  );
-  const importPath = materializeGrokImportSource(resolved, cwd, cacheDir);
+  const importPath = materializeGrokImportSource(resolved, cwd);
   return {
     host: "grok",
     sourcePath: resolved,

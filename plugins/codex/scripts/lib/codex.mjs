@@ -658,22 +658,49 @@ function sourceContentSha256(sourcePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex");
 }
 
+/**
+ * Normalize Windows paths for ledger comparison.
+ * Codex writes source_path with the extended-length prefix `\\?\` on Windows;
+ * Node's realpathSync does not, so exact string equality misses successful imports.
+ */
+export function normalizeLedgerPath(filePath) {
+  let value = String(filePath ?? "");
+  if (value.startsWith("\\\\?\\")) {
+    value = value.slice(4);
+  } else if (value.startsWith("//?/")) {
+    value = value.slice(4);
+  }
+  try {
+    if (fs.existsSync(value)) {
+      value = fs.realpathSync(value);
+    }
+  } catch {
+    // keep stripped path
+  }
+  // Case-insensitive, slash-normalized compare for Windows.
+  return path.resolve(value).replace(/\\/g, "/").toLowerCase();
+}
+
 function importedThreadIdForSource(sourcePath) {
   const ledgerPath = path.join(resolveCodexHome(), "external_agent_session_imports.json");
   if (!fs.existsSync(ledgerPath)) {
     return null;
   }
   const ledger = readJsonFile(ledgerPath);
-  const canonicalSource = fs.realpathSync(sourcePath);
-  const contentSha256 = sourceContentSha256(canonicalSource);
+  const readableSource = String(sourcePath ?? "").replace(/^\\\\\?\\/, "").replace(/^\/\/\?\//, "");
+  const canonicalSource = normalizeLedgerPath(readableSource);
+  const contentSha256 = sourceContentSha256(readableSource);
   const records = Array.isArray(ledger?.records) ? ledger.records : [];
   const match = records
-    .filter(
-      (record) =>
-        record?.source_path === canonicalSource &&
-        record?.content_sha256 === contentSha256 &&
-        typeof record?.imported_thread_id === "string"
-    )
+    .filter((record) => {
+      if (typeof record?.imported_thread_id !== "string") {
+        return false;
+      }
+      if (record?.content_sha256 !== contentSha256) {
+        return false;
+      }
+      return normalizeLedgerPath(record?.source_path) === canonicalSource;
+    })
     .at(-1);
   return match?.imported_thread_id ?? null;
 }
@@ -922,6 +949,28 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
   };
 }
 
+/**
+ * Prefer a live shared broker when present; otherwise start a direct app-server.
+ * Stale broker.json endpoints are ignored (cleared by CodexAppServerClient.connect).
+ */
+async function connectPreferringLiveBroker(cwd, options = {}) {
+  try {
+    return await CodexAppServerClient.connect(cwd, {
+      ...options,
+      reuseExistingBroker: true
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/ENOENT|ECONNREFUSED|not connected|EPIPE/i.test(message)) {
+      throw error;
+    }
+    return CodexAppServerClient.connect(cwd, {
+      ...options,
+      disableBroker: true
+    });
+  }
+}
+
 export async function getCodexAuthStatus(cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
@@ -939,10 +988,7 @@ export async function getCodexAuthStatus(cwd, options = {}) {
 
   let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd, {
-      env: options.env,
-      reuseExistingBroker: true
-    });
+    client = await connectPreferringLiveBroker(cwd, { env: options.env });
     return await getCodexAuthStatusFromClient(client, cwd);
   } catch (error) {
     return buildAuthStatus({

@@ -15,7 +15,12 @@ import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseBrokerEndpoint } from "./broker-endpoint.mjs";
-import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
+import {
+  clearBrokerSession,
+  ensureBrokerSession,
+  loadBrokerSession,
+  waitForBrokerEndpoint
+} from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 
 function loadPluginManifest() {
@@ -359,10 +364,22 @@ export class CodexAppServerClient {
   static async connect(cwd, options = {}) {
     let brokerEndpoint = null;
     if (!options.disableBroker) {
-      brokerEndpoint = options.brokerEndpoint ?? options.env?.[BROKER_ENDPOINT_ENV] ?? process.env[BROKER_ENDPOINT_ENV] ?? null;
+      brokerEndpoint =
+        options.brokerEndpoint ?? options.env?.[BROKER_ENDPOINT_ENV] ?? process.env[BROKER_ENDPOINT_ENV] ?? null;
+
       if (!brokerEndpoint && options.reuseExistingBroker) {
-        brokerEndpoint = loadBrokerSession(cwd)?.endpoint ?? null;
+        const existing = loadBrokerSession(cwd);
+        if (existing?.endpoint) {
+          const ready = await waitForBrokerEndpoint(existing.endpoint, 200).catch(() => false);
+          if (ready) {
+            brokerEndpoint = existing.endpoint;
+          } else {
+            // Stale broker.json left after process exit — drop it and fall through.
+            clearBrokerSession(cwd);
+          }
+        }
       }
+
       if (!brokerEndpoint && !options.reuseExistingBroker) {
         const brokerSession = await ensureBrokerSession(cwd, { env: options.env });
         brokerEndpoint = brokerSession?.endpoint ?? null;

@@ -183,3 +183,14 @@ test("marketplace Grok manifest exists (no Claude dual-host)", () => {
   assert.equal(marketplace.plugins[0].name, "codex");
   assert.match(marketplace.metadata.version, /grok/i);
 });
+
+test("slash commands are exposed as Grok-native skills", () => {
+  for (const name of ["setup", "review", "status", "transfer", "rescue", "cancel", "result", "adversarial-review"]) {
+    const skill = path.join(PLUGIN_ROOT, "skills", name, "SKILL.md");
+    assert.equal(fs.existsSync(skill), true, `missing skill ${name}`);
+    const source = fs.readFileSync(skill, "utf8");
+    assert.match(source, new RegExp(`name:\\s*${name}`));
+    assert.match(source, /user-invocable:\s*true/);
+    assert.match(source, /GROK_PLUGIN_ROOT/);
+  }
+});
