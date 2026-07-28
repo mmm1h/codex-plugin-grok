@@ -653,6 +653,7 @@ test("task --resume-last ignores running tasks from other host sessions", () => 
             sessionId: "sess-other",
             threadId: "thr_other",
             summary: "Other session active task",
+            pid: process.pid,
             updatedAt: "2026-03-24T20:05:00.000Z"
           }
         ]
@@ -1128,6 +1129,7 @@ test("status shows phases, hints, and the latest finished job", () => {
             phase: "reviewing",
             threadId: "thr_1",
             summary: "Review working tree diff",
+            pid: process.pid,
             logFile,
             createdAt: "2026-03-18T15:30:00.000Z",
             updatedAt: "2026-03-18T15:30:03.000Z"
@@ -1204,6 +1206,7 @@ test("status without a job id only shows jobs from the current host session", ()
             sessionId: "sess-current",
             threadId: "thr_current",
             summary: "Current session review",
+            pid: process.pid,
             logFile: currentLog,
             createdAt: "2026-03-18T15:30:00.000Z",
             updatedAt: "2026-03-18T15:30:00.000Z"
@@ -1271,6 +1274,7 @@ test("status preserves adversarial review kind labels", () => {
             phase: "reviewing",
             threadId: "thr_adv_live",
             summary: "Adversarial review current changes",
+            pid: process.pid,
             logFile,
             createdAt: "2026-03-18T15:30:00.000Z",
             updatedAt: "2026-03-18T15:30:00.000Z"
@@ -1343,6 +1347,7 @@ test("status --wait times out cleanly when a job is still active", () => {
             title: "Codex Task",
             jobClass: "task",
             summary: "Investigate flaky test",
+            pid: process.pid,
             logFile,
             createdAt: "2026-03-18T15:30:00.000Z",
             startedAt: "2026-03-18T15:30:01.000Z",
@@ -1671,6 +1676,7 @@ test("cancel without a job id ignores active jobs from other host sessions", () 
             jobClass: "task",
             sessionId: "sess-other",
             summary: "Other session run",
+            pid: process.pid,
             updatedAt: "2026-03-24T20:05:00.000Z",
             logFile
           }
@@ -1726,7 +1732,7 @@ test("cancel with a job id can still target an active job from another host sess
             jobClass: "task",
             sessionId: "sess-other",
             summary: "Other session run",
-            updatedAt: "2026-03-24T20:05:00.000Z",
+            updatedAt: new Date().toISOString(),
             logFile
           }
         ]
@@ -2033,6 +2039,7 @@ test("stop hook logs running tasks to stderr without blocking when the review ga
             title: "Codex Task",
             jobClass: "task",
             sessionId: "sess-current",
+            pid: process.pid,
             logFile: runningLog,
             createdAt: "2026-03-18T15:32:00.000Z",
             updatedAt: "2026-03-18T15:33:00.000Z"

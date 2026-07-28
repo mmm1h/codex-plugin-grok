@@ -3,13 +3,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { isProcessAlive } from "./process.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 const STATE_VERSION = 1;
 const FALLBACK_STATE_ROOT_DIR = path.join(os.tmpdir(), "codex-companion");
 const STATE_FILE_NAME = "state.json";
+const STATE_LOCK_FILE_NAME = "state.lock";
 const JOBS_DIR_NAME = "jobs";
 const MAX_JOBS = 50;
+const STATE_LOCK_TIMEOUT_MS = 2000;
+const STATE_LOCK_STALE_MS = 10000;
+const STATE_LOCK_RETRY_MIN_MS = 20;
+const STATE_LOCK_RETRY_MAX_MS = 50;
+const STALE_JOB_GRACE_PERIOD_MS = 30000;
+const STALE_JOB_ERROR_MESSAGE =
+  "Codex job process is no longer running (orphaned); marked stale.";
+const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 function resolvePluginDataDir() {
   return process.env.GROK_PLUGIN_DATA || null;
@@ -92,10 +102,121 @@ function removeFileIfExists(filePath) {
   }
 }
 
-export function saveState(cwd, state) {
-  const previousJobs = loadState(cwd).jobs;
+function sleepSync(milliseconds) {
+  Atomics.wait(WAIT_ARRAY, 0, 0, milliseconds);
+}
+
+function resolveStateLockFile(cwd) {
+  return path.join(resolveStateDir(cwd), STATE_LOCK_FILE_NAME);
+}
+
+function removeLockIfStale(lockFile) {
+  try {
+    const lockStat = fs.statSync(lockFile);
+    if (Date.now() - lockStat.mtimeMs <= STATE_LOCK_STALE_MS) {
+      return false;
+    }
+    fs.unlinkSync(lockFile);
+    return true;
+  } catch (error) {
+    return error?.code === "ENOENT";
+  }
+}
+
+function acquireStateLock(cwd) {
   ensureStateDir(cwd);
-  const nextJobs = pruneJobs(state.jobs ?? []);
+  const lockFile = resolveStateLockFile(cwd);
+  const deadline = Date.now() + STATE_LOCK_TIMEOUT_MS;
+  const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+
+  while (true) {
+    let descriptor = null;
+    try {
+      descriptor = fs.openSync(lockFile, "wx");
+      try {
+        fs.writeFileSync(descriptor, token, "utf8");
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return { lockFile, token };
+    } catch (error) {
+      if (descriptor !== null) {
+        try {
+          fs.unlinkSync(lockFile);
+        } catch {
+          // The incomplete lock will be handled by timeout recovery if cleanup fails.
+        }
+      }
+      if (error?.code !== "EEXIST") {
+        return null;
+      }
+    }
+
+    if (removeLockIfStale(lockFile)) {
+      continue;
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return null;
+    }
+    const retryMs =
+      STATE_LOCK_RETRY_MIN_MS +
+      Math.floor(Math.random() * (STATE_LOCK_RETRY_MAX_MS - STATE_LOCK_RETRY_MIN_MS + 1));
+    sleepSync(Math.min(retryMs, remainingMs));
+  }
+}
+
+function releaseStateLock(lock) {
+  try {
+    if (fs.readFileSync(lock.lockFile, "utf8") === lock.token) {
+      fs.unlinkSync(lock.lockFile);
+    }
+  } catch {
+    // Another process may have recovered or replaced an expired lock.
+  }
+}
+
+function withStateLock(cwd, operation) {
+  const lock = acquireStateLock(cwd);
+  if (!lock) {
+    process.stderr.write(
+      "Warning: timed out acquiring Codex state lock; continuing without cross-process locking.\n"
+    );
+  }
+
+  try {
+    return operation();
+  } finally {
+    if (lock) {
+      releaseStateLock(lock);
+    }
+  }
+}
+
+function atomicWriteFile(filePath, contents) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporaryFile = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
+  );
+
+  try {
+    fs.writeFileSync(temporaryFile, contents, "utf8");
+    fs.renameSync(temporaryFile, filePath);
+  } finally {
+    try {
+      removeFileIfExists(temporaryFile);
+    } catch {
+      // The rename already committed the write, or cleanup is best effort.
+    }
+  }
+}
+
+function saveStateUnlocked(cwd, state) {
+  ensureStateDir(cwd);
+  const providedJobs = Array.isArray(state.jobs) ? state.jobs : [];
+  const nextJobs = pruneJobs(providedJobs);
   const nextState = {
     version: STATE_VERSION,
     config: {
@@ -106,7 +227,7 @@ export function saveState(cwd, state) {
   };
 
   const retainedIds = new Set(nextJobs.map((job) => job.id));
-  for (const job of previousJobs) {
+  for (const job of providedJobs) {
     if (retainedIds.has(job.id)) {
       continue;
     }
@@ -114,14 +235,20 @@ export function saveState(cwd, state) {
     removeFileIfExists(job.logFile);
   }
 
-  fs.writeFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
+  atomicWriteFile(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`);
   return nextState;
 }
 
+export function saveState(cwd, state) {
+  return withStateLock(cwd, () => saveStateUnlocked(cwd, state));
+}
+
 export function updateState(cwd, mutate) {
-  const state = loadState(cwd);
-  mutate(state);
-  return saveState(cwd, state);
+  return withStateLock(cwd, () => {
+    const state = loadState(cwd);
+    mutate(state);
+    return saveStateUnlocked(cwd, state);
+  });
 }
 
 export function generateJobId(prefix = "job") {
@@ -169,7 +296,7 @@ export function getConfig(cwd) {
 export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const jobFile = resolveJobFile(cwd, jobId);
-  fs.writeFileSync(jobFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  atomicWriteFile(jobFile, `${JSON.stringify(payload, null, 2)}\n`);
   return jobFile;
 }
 
@@ -191,4 +318,70 @@ export function resolveJobLogFile(cwd, jobId) {
 export function resolveJobFile(cwd, jobId) {
   ensureStateDir(cwd);
   return path.join(resolveJobsDir(cwd), `${jobId}.json`);
+}
+
+export function reconcileStaleJobs(cwd, options = {}) {
+  const nowValue = typeof options.now === "function" ? options.now() : (options.now ?? Date.now());
+  const now = Number(nowValue);
+  const completedAt = new Date(now).toISOString();
+  const isProcessAliveImpl = options.isProcessAliveImpl ?? isProcessAlive;
+  const ids = [];
+
+  withStateLock(cwd, () => {
+    const state = loadState(cwd);
+    state.jobs = state.jobs.map((job) => {
+      if (job.status !== "queued" && job.status !== "running") {
+        return job;
+      }
+
+      const lastUpdate = Date.parse(job.updatedAt ?? job.createdAt);
+      if (now - lastUpdate < STALE_JOB_GRACE_PERIOD_MS) {
+        return job;
+      }
+
+      const processAlive = Number.isFinite(job.pid) && isProcessAliveImpl(job.pid);
+      if (processAlive) {
+        return job;
+      }
+
+      const stalePatch = {
+        status: "failed",
+        phase: "stale",
+        pid: null,
+        completedAt,
+        updatedAt: completedAt,
+        errorMessage: STALE_JOB_ERROR_MESSAGE
+      };
+      const staleJob = {
+        ...job,
+        ...stalePatch
+      };
+      ids.push(job.id);
+
+      const jobFile = resolveJobFile(cwd, job.id);
+      if (fs.existsSync(jobFile)) {
+        let storedJob = job;
+        try {
+          storedJob = readJobFile(jobFile);
+        } catch {
+          // Replace an unreadable stored record with the indexed job details.
+        }
+        try {
+          writeJobFile(cwd, job.id, {
+            ...storedJob,
+            ...stalePatch
+          });
+        } catch {
+          // State reconciliation must still complete if an artifact cannot be updated.
+        }
+      }
+
+      return staleJob;
+    });
+    if (ids.length > 0) {
+      saveStateUnlocked(cwd, state);
+    }
+  });
+
+  return { reconciled: ids.length, ids };
 }

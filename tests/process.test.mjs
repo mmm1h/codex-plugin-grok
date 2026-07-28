@@ -4,10 +4,100 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { makeTempDir } from "./helpers.mjs";
+import { readStdinIfPiped, readStdinJson } from "../plugins/codex/scripts/lib/fs.mjs";
 import {
+  isProcessAlive,
   resolveCommandInvocation,
   terminateProcessTree
 } from "../plugins/codex/scripts/lib/process.mjs";
+
+test("isProcessAlive returns true when the process probe succeeds", () => {
+  let invocation = null;
+
+  assert.equal(
+    isProcessAlive(1234, {
+      killImpl(pid, signal) {
+        invocation = { pid, signal };
+      }
+    }),
+    true
+  );
+  assert.deepEqual(invocation, { pid: 1234, signal: 0 });
+});
+
+test("isProcessAlive returns false for ESRCH", () => {
+  assert.equal(
+    isProcessAlive(1234, {
+      killImpl() {
+        const error = new Error("missing");
+        error.code = "ESRCH";
+        throw error;
+      }
+    }),
+    false
+  );
+});
+
+test("isProcessAlive returns true for EPERM", () => {
+  assert.equal(
+    isProcessAlive(1234, {
+      killImpl() {
+        const error = new Error("denied");
+        error.code = "EPERM";
+        throw error;
+      }
+    }),
+    true
+  );
+});
+
+test("readStdinIfPiped skips stdin that is neither a FIFO nor a file", () => {
+  const originalFstatSync = fs.fstatSync;
+  const originalReadFileSync = fs.readFileSync;
+  let probed = false;
+  let read = false;
+
+  try {
+    fs.fstatSync = () => {
+      probed = true;
+      return {
+        isFIFO: () => false,
+        isFile: () => false
+      };
+    };
+    fs.readFileSync = () => {
+      read = true;
+      throw new Error("stdin must not be read");
+    };
+
+    assert.equal(readStdinIfPiped(), "");
+    assert.equal(probed, true);
+    assert.equal(read, false);
+  } finally {
+    fs.fstatSync = originalFstatSync;
+    fs.readFileSync = originalReadFileSync;
+  }
+});
+
+test("readStdinJson returns an empty object for empty or invalid JSON", () => {
+  const originalFstatSync = fs.fstatSync;
+  const originalReadFileSync = fs.readFileSync;
+  const inputs = ["", "{invalid json"];
+
+  try {
+    fs.fstatSync = () => ({
+      isFIFO: () => true,
+      isFile: () => false
+    });
+    fs.readFileSync = () => inputs.shift();
+
+    assert.deepEqual(readStdinJson(), {});
+    assert.deepEqual(readStdinJson(), {});
+  } finally {
+    fs.fstatSync = originalFstatSync;
+    fs.readFileSync = originalReadFileSync;
+  }
+});
 
 test("resolveCommandInvocation maps a Windows codex npm shim to its Node entrypoint", () => {
   const binDir = makeTempDir("codex-process-shim-");

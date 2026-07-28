@@ -30,6 +30,7 @@ import {
   generateJobId,
   getConfig,
   listJobs,
+  reconcileStaleJobs,
   setConfig,
   upsertJob,
   writeJobFile
@@ -342,6 +343,7 @@ async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
 
 async function resolveLatestTrackedTaskThread(cwd, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+  reconcileStaleJobs(workspaceRoot);
   const sessionId = getCurrentSessionId();
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot)).filter((job) => job.id !== options.excludeJobId);
   const visibleJobs = filterJobsForCurrentSession(jobs);

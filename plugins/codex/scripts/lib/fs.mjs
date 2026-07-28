@@ -36,5 +36,30 @@ export function readStdinIfPiped() {
   if (process.stdin.isTTY) {
     return "";
   }
-  return fs.readFileSync(0, "utf8");
+
+  try {
+    const stdinStat = fs.fstatSync(0);
+    const isWindowsPipe =
+      process.platform === "win32" &&
+      (stdinStat.mode & fs.constants.S_IFMT) === fs.constants.S_IFIFO;
+    if (!stdinStat.isFIFO() && !isWindowsPipe && !stdinStat.isFile()) {
+      return "";
+    }
+    return fs.readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+export function readStdinJson() {
+  const raw = readStdinIfPiped().trim();
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }

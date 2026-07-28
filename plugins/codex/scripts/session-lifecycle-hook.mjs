@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import process from "node:process";
 
+import { readStdinJson } from "./lib/fs.mjs";
 import { terminateProcessTree } from "./lib/process.mjs";
 import { BROKER_ENDPOINT_ENV } from "./lib/app-server.mjs";
 import {
@@ -13,7 +14,7 @@ import {
   sendBrokerShutdown,
   teardownBrokerSession
 } from "./lib/broker-lifecycle.mjs";
-import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
+import { resolveJobFile, resolveStateFile, updateState } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import {
@@ -30,11 +31,7 @@ import {
 export const SESSION_ID_ENV = COMPANION_SESSION_ID_ENV;
 
 function readHookInput() {
-  const raw = fs.readFileSync(0, "utf8").trim();
-  if (!raw) {
-    return {};
-  }
-  return JSON.parse(raw);
+  return readStdinJson();
 }
 
 export function cleanupSessionJobs(cwd, sessionId) {
@@ -48,8 +45,11 @@ export function cleanupSessionJobs(cwd, sessionId) {
     return { cleaned: false, removed: 0 };
   }
 
-  const state = loadState(workspaceRoot);
-  const removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+  let removedJobs = [];
+  updateState(workspaceRoot, (state) => {
+    removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+    state.jobs = state.jobs.filter((job) => job.sessionId !== sessionId);
+  });
   if (removedJobs.length === 0) {
     return { cleaned: false, removed: 0 };
   }
@@ -66,10 +66,13 @@ export function cleanupSessionJobs(cwd, sessionId) {
     }
   }
 
-  saveState(workspaceRoot, {
-    ...state,
-    jobs: state.jobs.filter((job) => job.sessionId !== sessionId)
-  });
+  for (const job of removedJobs) {
+    for (const artifact of [resolveJobFile(workspaceRoot, job.id), job.logFile]) {
+      if (artifact && fs.existsSync(artifact)) {
+        fs.unlinkSync(artifact);
+      }
+    }
+  }
   return { cleaned: true, removed: removedJobs.length };
 }
 

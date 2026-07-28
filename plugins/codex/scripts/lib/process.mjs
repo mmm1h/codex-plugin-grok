@@ -180,6 +180,26 @@ export function binaryAvailable(command, versionArgs = ["--version"], options = 
   return { available: true, detail: result.stdout.trim() || result.stderr.trim() || "ok" };
 }
 
+export function isProcessAlive(pid, options = {}) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+
+  const killImpl = options.killImpl ?? process.kill.bind(process);
+  try {
+    killImpl(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "EPERM") {
+      return true;
+    }
+    if (error?.code === "ESRCH") {
+      return false;
+    }
+    return false;
+  }
+}
+
 function looksLikeMissingProcessMessage(text) {
   // Include Chinese Windows taskkill messages ("找不到" / "不支持") and
   // common English variants so cancel/cleanup does not hard-fail mid-teardown.
