@@ -1,15 +1,145 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
+function envValue(env, name) {
+  const entry = Object.entries(env ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase());
+  return entry?.[1] ?? "";
+}
+
+function windowsPathEntries(env) {
+  return String(envValue(env, "PATH"))
+    .split(path.delimiter)
+    .map((entry) => entry.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+}
+
+function findWindowsCommand(command, env) {
+  const hasPath = path.isAbsolute(command) || command.includes("\\") || command.includes("/");
+  const directories = hasPath ? [path.dirname(path.resolve(command))] : windowsPathEntries(env);
+  const basename = hasPath ? path.basename(command) : command;
+  const extension = path.extname(basename);
+  const names = extension
+    ? [basename]
+    : [`${basename}.exe`, `${basename}.com`, `${basename}.cmd`, `${basename}.bat`, basename];
+
+  for (const directory of directories) {
+    for (const name of names) {
+      const candidate = path.join(directory, name);
+      try {
+        if (fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // Keep searching PATH.
+      }
+    }
+  }
+  return null;
+}
+
+function isNodeScript(filePath) {
+  try {
+    const prefix = fs.readFileSync(filePath, "utf8").slice(0, 160);
+    return /^#!.*\bnode(?:\.exe)?\b/im.test(prefix);
+  } catch {
+    return false;
+  }
+}
+
+function resolveNodeShimEntrypoint(shimPath) {
+  const directory = path.dirname(shimPath);
+  const name = path.basename(shimPath, path.extname(shimPath)).toLowerCase();
+  const candidates = [];
+
+  if (name === "codex") {
+    candidates.push(path.join(directory, "node_modules", "@openai", "codex", "bin", "codex.js"));
+  } else if (name === "npm") {
+    candidates.push(path.join(directory, "node_modules", "npm", "bin", "npm-cli.js"));
+  }
+
+  const extensionlessSibling = path.join(directory, name);
+  if (isNodeScript(extensionlessSibling)) {
+    candidates.unshift(extensionlessSibling);
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+const CMD_META_CHARS = /([()%!^"<>&|])/g;
+
+function escapeCmdCommand(value) {
+  return String(value).replace(CMD_META_CHARS, "^$1");
+}
+
+function escapeCmdArgument(value) {
+  let escaped = String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
+  escaped = `"${escaped}"`;
+  return escaped.replace(CMD_META_CHARS, "^$1");
+}
+
+function explicitCmdInvocation(command, args, env) {
+  const commandLine = [escapeCmdCommand(command), ...args.map(escapeCmdArgument)].join(" ");
+  return {
+    command: envValue(env, "ComSpec") || "cmd.exe",
+    args: ["/d", "/s", "/c", `"${commandLine}"`],
+    windowsVerbatimArguments: true
+  };
+}
+
+/**
+ * Resolve a command without relying on shell argument forwarding.
+ * npm-generated codex/npm .cmd shims are launched through their JS entrypoint.
+ */
+export function resolveCommandInvocation(command, args = [], options = {}) {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  if (platform !== "win32") {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+
+  const resolved = findWindowsCommand(command, env);
+  if (!resolved) {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+
+  if (/\.(?:cmd|bat)$/i.test(resolved)) {
+    const nodeEntrypoint = resolveNodeShimEntrypoint(resolved);
+    if (nodeEntrypoint) {
+      return {
+        command: process.execPath,
+        args: [nodeEntrypoint, ...args],
+        windowsVerbatimArguments: false
+      };
+    }
+    return explicitCmdInvocation(resolved, args, env);
+  }
+
+  if (!path.extname(resolved) && isNodeScript(resolved)) {
+    return {
+      command: process.execPath,
+      args: [resolved, ...args],
+      windowsVerbatimArguments: false
+    };
+  }
+
+  return { command: resolved, args, windowsVerbatimArguments: false };
+}
+
 export function runCommand(command, args = [], options = {}) {
-  const result = spawnSync(command, args, {
+  const invocation = resolveCommandInvocation(command, args, {
+    env: options.env,
+    platform: options.platform
+  });
+  const result = spawnSync(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    shell: options.shell ?? (process.platform === "win32" ? (process.env.SHELL || true) : false),
+    shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true
   });
 

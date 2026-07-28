@@ -21,7 +21,7 @@ import {
   loadBrokerSession,
   waitForBrokerEndpoint
 } from "./broker-lifecycle.mjs";
-import { terminateProcessTree } from "./process.mjs";
+import { resolveCommandInvocation, terminateProcessTree } from "./process.mjs";
 
 function loadPluginManifest() {
   const candidates = [
@@ -215,11 +215,15 @@ class SpawnedCodexAppServerClient extends AppServerClientBase {
   }
 
   async initialize() {
-    this.proc = spawn("codex", ["app-server"], {
+    const invocation = resolveCommandInvocation("codex", ["app-server"], {
+      env: this.options.env ?? process.env
+    });
+    this.proc = spawn(invocation.command, invocation.args, {
       cwd: this.cwd,
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+      shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true
     });
 
@@ -273,9 +277,7 @@ class SpawnedCodexAppServerClient extends AppServerClientBase {
       this.proc.stdin.end();
       setTimeout(() => {
         if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
-          // On Windows with shell: true, the direct child is cmd.exe.
-          // Use terminateProcessTree to kill the entire tree including
-          // the grandchild node process.
+          // Keep Windows process-tree cleanup for Codex and any child tools.
           if (process.platform === "win32") {
             try {
               terminateProcessTree(this.proc.pid);

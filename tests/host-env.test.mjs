@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
+  encodeGrokSessionGroup,
   GROK_PLUGIN_ROOT_EXPR,
   expandPluginRootExpression,
   resolvePluginScriptPath,
+  resolveHookEventName,
   resolveHostSessionId,
   resolveLastAssistantMessage
 } from "../plugins/codex/scripts/lib/host-env.mjs";
@@ -23,6 +25,12 @@ test("Grok plugin root expression expands with GROK_PLUGIN_ROOT", () => {
     GROK_PLUGIN_ROOT: "D:\\plugin\\codex"
   });
   assert.equal(expanded, "D:\\plugin\\codex");
+});
+
+test("Grok hook event and session path helpers use the wire contract", () => {
+  assert.equal(resolveHookEventName({ hookEventName: "session_end" }), "session_end");
+  assert.equal(resolveHookEventName({ hook_event_name: "SessionEnd" }), "");
+  assert.equal(encodeGrokSessionGroup(path.join(ROOT, ".")), encodeURIComponent(path.resolve(ROOT)));
 });
 
 test("hooks.json uses GROK_PLUGIN_ROOT only", () => {
@@ -59,7 +67,7 @@ test("SessionStart hook runs with Grok plugin env", () => {
     if (fs.existsSync(envFile)) {
       fs.unlinkSync(envFile);
     }
-    const result = spawnSync(process.execPath, [SESSION_HOOK, "SessionStart"], {
+    const result = spawnSync(process.execPath, [SESSION_HOOK], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -191,6 +199,32 @@ test("stop-review gate reads Grok lastAssistantMessage and sessionId", async () 
     filtered.map((j) => j.id),
     ["a"]
   );
+});
+
+test("stop-review timeout invokes process-tree cleanup before Grok's outer deadline", async () => {
+  const { makeTempDir } = await import("./helpers.mjs");
+  const { runStopReview } = await import("../plugins/codex/scripts/stop-review-gate-hook.mjs");
+  const cwd = makeTempDir("grok-stop-timeout-");
+  const childScript = path.join(cwd, "hang.mjs");
+  fs.writeFileSync(childScript, "setInterval(() => {}, 1000);\n", "utf8");
+
+  const result = await runStopReview(
+    cwd,
+    {
+      hookEventName: "stop",
+      reason: "end_turn",
+      sessionId: "timeout-sess",
+      lastAssistantMessage: "Review this."
+    },
+    process.env,
+    {
+      scriptPath: childScript,
+      timeoutMs: 75
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /timed out before Grok's hook deadline/i);
 });
 
 test("createJobRecord and companion status resolve via GROK_SESSION_ID", async () => {

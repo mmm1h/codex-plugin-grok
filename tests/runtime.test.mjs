@@ -58,7 +58,8 @@ test("setup is ready without npm when Codex is already installed and authenticat
     fs.symlinkSync(process.execPath, path.join(binDir, "node"));
   }
 
-  const result = run("node", [SCRIPT, "setup", "--json"], {
+  // Launch the parent explicitly because the child PATH intentionally contains only test shims.
+  const result = run(process.execPath, [SCRIPT, "setup", "--json"], {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -1816,7 +1817,7 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
     cwd: repo,
     env,
     input: JSON.stringify({
-      hook_event_name: "SessionEnd",
+      hookEventName: "session_end",
       cwd: repo
     })
   });
@@ -1909,14 +1910,14 @@ test("session end fully cleans up jobs for the ending session", async (t) => {
     "utf8"
   );
 
-  const result = run("node", [SESSION_HOOK, "SessionEnd"], {
+  const result = run("node", [SESSION_HOOK], {
     cwd: repo,
     env: {
       ...process.env,
       CODEX_COMPANION_SESSION_ID: "sess-current"
     },
     input: JSON.stringify({
-      hook_event_name: "SessionEnd",
+      hookEventName: "session_end",
       sessionId: "sess-current",
       cwd: repo
     })
@@ -1973,6 +1974,8 @@ test("stop hook runs a stop-time review task and blocks on findings when the rev
     cwd: repo,
     env: buildEnv(binDir),
     input: JSON.stringify({
+      hookEventName: "stop",
+      reason: "end_turn",
       cwd: repo,
       sessionId: "sess-stop-review",
       lastAssistantMessage: "I completed the refactor and updated the retry logic."
@@ -2048,7 +2051,7 @@ test("stop hook logs running tasks to stderr without blocking when the review ga
       ...process.env,
       CODEX_COMPANION_SESSION_ID: "sess-current"
     },
-    input: JSON.stringify({ cwd: repo })
+    input: JSON.stringify({ hookEventName: "stop", reason: "end_turn", cwd: repo })
   });
 
   assert.equal(blocked.status, 0, blocked.stderr);
@@ -2076,11 +2079,52 @@ test("stop hook allows the stop when the review gate is enabled and the stop-tim
   const allowed = run("node", [STOP_HOOK], {
     cwd: repo,
     env: buildEnv(binDir),
-    input: JSON.stringify({ cwd: repo, sessionId: "sess-stop-clean" })
+    input: JSON.stringify({
+      hookEventName: "stop",
+      reason: "end_turn",
+      cwd: repo,
+      sessionId: "sess-stop-clean"
+    })
   });
 
   assert.equal(allowed.status, 0, allowed.stderr);
   assert.equal(allowed.stdout.trim(), "");
+});
+
+test("stop hook skips Grok's observe-only session-close event", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+
+  const env = buildEnv(binDir);
+  const setup = run("node", [SCRIPT, "setup", "--enable-review-gate", "--json"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(setup.status, 0, setup.stderr);
+
+  const before = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
+  const closed = run("node", [STOP_HOOK], {
+    cwd: repo,
+    env,
+    input: JSON.stringify({
+      hookEventName: "stop",
+      reason: "shutdown",
+      sessionId: "sess-closing",
+      cwd: repo,
+      lastAssistantMessage: "Session is closing."
+    })
+  });
+
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.equal(closed.stdout.trim(), "");
+  const after = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
+  assert.deepEqual(after, before);
 });
 
 test("stop hook does not block when Codex is unavailable even if the review gate is enabled", () => {
@@ -2101,7 +2145,7 @@ test("stop hook does not block when Codex is unavailable even if the review gate
       ...process.env,
       PATH: ""
     },
-    input: JSON.stringify({ cwd: repo })
+    input: JSON.stringify({ hookEventName: "stop", reason: "end_turn", cwd: repo })
   });
 
   assert.equal(allowed.status, 0, allowed.stderr);
@@ -2128,7 +2172,7 @@ test("stop hook runs the actual task when auth status looks stale", () => {
   const allowed = run("node", [STOP_HOOK], {
     cwd: repo,
     env: buildEnv(binDir),
-    input: JSON.stringify({ cwd: repo })
+    input: JSON.stringify({ hookEventName: "stop", reason: "end_turn", cwd: repo })
   });
 
   assert.equal(allowed.status, 0, allowed.stderr);
@@ -2176,7 +2220,7 @@ test("commands lazily start and reuse one shared app-server after first use", as
     cwd: repo,
     env,
     input: JSON.stringify({
-      hook_event_name: "SessionEnd",
+      hookEventName: "session_end",
       cwd: repo
     })
   });
@@ -2221,7 +2265,7 @@ test("setup reuses an existing shared app-server without starting another one", 
     cwd: repo,
     env,
     input: JSON.stringify({
-      hook_event_name: "SessionEnd",
+      hookEventName: "session_end",
       cwd: repo
     })
   });

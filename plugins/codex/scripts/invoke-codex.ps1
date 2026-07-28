@@ -28,7 +28,7 @@ param(
   [string]$Effort = "medium",
 
   [Parameter(Mandatory = $false)]
-  [string]$Profile = "codex-api",
+  [string]$Profile,
 
   [Parameter(Mandatory = $false)]
   [switch]$ReadOnly,
@@ -55,41 +55,45 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $outFile = Join-Path $OutDir $OutName
 
 if (-not $CodexCmd) {
-  $candidates = @(
-    (Get-Command codex -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
-    (Join-Path $env:APPDATA "npm\codex.cmd"),
-    (Join-Path $env:APPDATA "npm\codex"),
-    "codex"
-  ) | Where-Object { $_ }
-  $CodexCmd = $candidates | Where-Object {
-    $_ -eq "codex" -or (Test-Path -LiteralPath $_)
+  $codexCandidates = @()
+  if ($env:APPDATA) {
+    $codexCandidates += Join-Path $env:APPDATA "npm\codex.cmd"
+  }
+  $codexCandidates += Get-Command codex.cmd -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+  $codexCandidates += Get-Command codex -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+  $CodexCmd = $codexCandidates | Where-Object {
+    $_ -and (Test-Path -LiteralPath $_)
   } | Select-Object -First 1
   if (-not $CodexCmd) {
     throw "codex CLI not found. Install with: npm install -g @openai/codex"
   }
 }
 
-$args = @(
-  "exec",
-  "--profile", $Profile,
+$codexArgs = @("exec")
+if ($Profile) {
+  $codexArgs += @("--profile", $Profile)
+}
+$codexArgs += @(
   "-c", "model_reasoning_effort=$Effort",
   "-C", $repoPath,
   "-o", $outFile
 )
 if ($ReadOnly) {
-  $args += @("-s", "read-only")
+  $codexArgs += @("-s", "read-only")
 }
 
 if ($PromptFile) {
   $promptPath = (Resolve-Path -LiteralPath $PromptFile).Path
-  $args += "-"
-  Write-Host "invoke-codex: piping $promptPath -> $CodexCmd $($args -join ' ')"
-  Get-Content -Raw -LiteralPath $promptPath | & $CodexCmd @args
+  $codexArgs += "-"
+  Write-Host "invoke-codex: piping $promptPath -> $CodexCmd $($codexArgs -join ' ')"
+  Get-Content -Raw -LiteralPath $promptPath | & $CodexCmd @codexArgs
 } else {
-  $args += $Prompt
-  Write-Host "invoke-codex: $CodexCmd $($args -join ' ')"
+  $codexArgs += $Prompt
+  Write-Host "invoke-codex: $CodexCmd $($codexArgs -join ' ')"
   # Close stdin so codex.ps1 / codex.cmd does not block on "Reading additional input from stdin..."
-  $null | & $CodexCmd @args
+  $null | & $CodexCmd @codexArgs
 }
 
 $code = $LASTEXITCODE

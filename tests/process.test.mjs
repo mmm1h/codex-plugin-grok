@@ -1,7 +1,81 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
-import { terminateProcessTree } from "../plugins/codex/scripts/lib/process.mjs";
+import { makeTempDir } from "./helpers.mjs";
+import {
+  resolveCommandInvocation,
+  terminateProcessTree
+} from "../plugins/codex/scripts/lib/process.mjs";
+
+test("resolveCommandInvocation maps a Windows codex npm shim to its Node entrypoint", () => {
+  const binDir = makeTempDir("codex-process-shim-");
+  const entrypoint = path.join(binDir, "node_modules", "@openai", "codex", "bin", "codex.js");
+  fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+  fs.writeFileSync(entrypoint, "#!/usr/bin/env node\n");
+  fs.writeFileSync(path.join(binDir, "codex.cmd"), "@echo off\r\n");
+
+  const invocation = resolveCommandInvocation("codex", ["app-server"], {
+    platform: "win32",
+    env: {
+      PATH: binDir
+    }
+  });
+
+  assert.equal(invocation.command, process.execPath);
+  assert.deepEqual(invocation.args, [entrypoint, "app-server"]);
+  assert.equal(invocation.windowsVerbatimArguments, false);
+});
+
+test("resolveCommandInvocation maps an extensionless Node script to process.execPath", () => {
+  const binDir = makeTempDir("codex-process-node-script-");
+  const scriptPath = path.join(binDir, "fixture-tool");
+  fs.writeFileSync(scriptPath, "#!/usr/bin/env node\n");
+
+  const invocation = resolveCommandInvocation("fixture-tool", ["arg"], {
+    platform: "win32",
+    env: {
+      PATH: binDir
+    }
+  });
+
+  assert.equal(invocation.command, process.execPath);
+  assert.deepEqual(invocation.args, [scriptPath, "arg"]);
+  assert.equal(invocation.windowsVerbatimArguments, false);
+});
+
+test("resolveCommandInvocation uses explicit cmd.exe for a non-Node batch file", () => {
+  const binDir = makeTempDir("codex-process-batch-");
+  const batchPath = path.join(binDir, "fixture-tool.cmd");
+  fs.writeFileSync(batchPath, "@echo off\r\n");
+
+  const invocation = resolveCommandInvocation("fixture-tool", ["space value", "a&b"], {
+    platform: "win32",
+    env: {
+      PATH: binDir,
+      ComSpec: "C:\\Windows\\System32\\cmd.exe"
+    }
+  });
+
+  assert.equal(invocation.command, "C:\\Windows\\System32\\cmd.exe");
+  assert.deepEqual(invocation.args.slice(0, 3), ["/d", "/s", "/c"]);
+  assert.match(invocation.args[3], /space value/);
+  assert.match(invocation.args[3], /a\^&b/);
+  assert.equal(invocation.windowsVerbatimArguments, true);
+});
+
+test("resolveCommandInvocation leaves ordinary POSIX commands as argument arrays", () => {
+  const invocation = resolveCommandInvocation("git", ["status", "--short"], {
+    platform: "linux",
+    env: {}
+  });
+  assert.deepEqual(invocation, {
+    command: "git",
+    args: ["status", "--short"],
+    windowsVerbatimArguments: false
+  });
+});
 
 test("terminateProcessTree uses taskkill on Windows", () => {
   let captured = null;

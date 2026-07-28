@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Grok Build host helpers.
@@ -157,6 +158,10 @@ export function resolveGrokHome() {
   return firstDefinedEnv("GROK_HOME") || path.join(resolveUserHome(), ".grok");
 }
 
+export function encodeGrokSessionGroup(cwd) {
+  return encodeURIComponent(path.resolve(cwd));
+}
+
 export function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -183,7 +188,7 @@ export function resolvePluginManifestUrl(importMetaUrl) {
   ];
   for (const url of candidates) {
     try {
-      const filePath = path.fileURLToPath ? path.fileURLToPath(url) : fileURLToPathCompat(url);
+      const filePath = fileURLToPath(url);
       if (fs.existsSync(filePath)) {
         return { url, path: filePath };
       }
@@ -192,10 +197,6 @@ export function resolvePluginManifestUrl(importMetaUrl) {
     }
   }
   return { url: candidates[0], path: null };
-}
-
-function fileURLToPathCompat(url) {
-  return decodeURIComponent(String(url).replace(/^file:\/\//, "").replace(/^\/([A-Za-z]:)/, "$1"));
 }
 
 /** @deprecated Use GROK_PLUGIN_ROOT_EXPR */

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.3-grok
+
+- Add a registry-aware, dry-run-by-default script to sync local source changes into matching Grok installed snapshots and optional marketplace copies
+- Document the exact Grok hook env/stdin contract, lifecycle behavior, transcript layout, Stop reasons, and nested timeouts
+- Remove Node 24 `DEP0190` hotspots by resolving Windows npm shims to Node entrypoints and keeping child-process arguments shell-free
+
+## 1.1.2-grok
+
+- Stop review gate ignores Grok's observe-only session-close event, keeps its internal timeout below Grok's outer deadline, and terminates timed-out process trees
+- SessionStart and transfer now share resolved cwd encoding; manifest URL loading uses Node's UNC-safe URL parser
+- Windows launcher uses the default Codex configuration unless `-Profile` is explicit and prefers `codex.cmd`
+- Build type generation now uses a cross-platform Node launcher instead of POSIX `mkdir -p`
+- Runtime tests use Grok camelCase hook envelopes and cover hook-event dispatch without argv fallbacks
+
 ## 1.1.1-grok
 
 - Portable Windows launcher: `scripts/invoke-codex.ps1` (pipe stdin, repo-local `tmp/codex-out`, no machine-hardcoded paths)

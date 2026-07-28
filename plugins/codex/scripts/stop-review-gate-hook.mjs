@@ -3,10 +3,11 @@
 import fs from "node:fs";
 import process from "node:process";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { getCodexAvailability } from "./lib/codex.mjs";
+import { terminateProcessTree } from "./lib/process.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import { getConfig, listJobs } from "./lib/state.mjs";
 import { sortJobsNewestFirst } from "./lib/job-control.mjs";
@@ -18,7 +19,9 @@ import {
   resolveLastAssistantMessage
 } from "./lib/host-env.mjs";
 
-const STOP_REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
+// Leave enough headroom for this hook to emit a block decision before Grok's
+// outer 900-second hook deadline fires.
+const STOP_REVIEW_TIMEOUT_MS = 13 * 60 * 1000;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, "..");
 const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Grok turn.";
@@ -40,6 +43,13 @@ function logNote(message) {
     return;
   }
   process.stderr.write(`${message}\n`);
+}
+
+export function shouldRunStopReview(input = {}) {
+  const reason = String(input?.reason ?? "").trim();
+  // Grok emits an observe-only Stop while the session is closing. Its decision
+  // is ignored, so starting a Codex review there only delays shutdown.
+  return !reason || reason === "end_turn";
 }
 
 function filterJobsForCurrentSession(jobs, input = {}, env = process.env) {
@@ -100,8 +110,8 @@ function parseStopReviewOutput(rawOutput) {
   };
 }
 
-function runStopReview(cwd, input = {}, env = process.env) {
-  const scriptPath = path.join(SCRIPT_DIR, "codex-companion.mjs");
+export async function runStopReview(cwd, input = {}, env = process.env, options = {}) {
+  const scriptPath = options.scriptPath ?? path.join(SCRIPT_DIR, "codex-companion.mjs");
   const prompt = buildStopReviewPrompt(input);
   const sessionId = resolveHostSessionId(input, env);
   const childEnv = {
@@ -113,18 +123,70 @@ function runStopReview(cwd, input = {}, env = process.env) {
         }
       : {})
   };
-  const result = spawnSync(process.execPath, [scriptPath, "task", "--json", prompt], {
+  const timeoutMs = options.timeoutMs ?? STOP_REVIEW_TIMEOUT_MS;
+  const terminateTree = options.terminateProcessTreeImpl ?? terminateProcessTree;
+  const child = spawn(process.execPath, [scriptPath, "task", "--json", prompt], {
     cwd,
     env: childEnv,
-    encoding: "utf8",
-    timeout: STOP_REVIEW_TIMEOUT_MS
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true
   });
 
-  if (result.error?.code === "ETIMEDOUT") {
+  const result = await new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+
+    const finish = (fields) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve({ stdout, stderr, timedOut, ...fields });
+    };
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => finish({ status: null, signal: null, error }));
+    child.on("close", (status, signal) => finish({ status, signal, error: null }));
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        terminateTree(child.pid, { cwd, env: childEnv });
+      } catch {
+        // The direct-child kill below is still required as a fallback.
+      }
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // The child may have exited while timeout cleanup was running.
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      finish({ status: null, signal: "SIGTERM", error: null });
+    }, timeoutMs);
+  });
+
+  if (result.timedOut) {
     return {
       ok: false,
       reason:
-        "The stop-time Codex review task timed out after 15 minutes. Run /codex:review --wait manually or bypass the gate."
+        "The stop-time Codex review task timed out before Grok's hook deadline. Its process tree was terminated; run /codex:review --wait manually or bypass the gate."
+    };
+  }
+
+  if (result.error) {
+    return {
+      ok: false,
+      reason: `The stop-time Codex review task failed to start: ${result.error.message}`
     };
   }
 
@@ -150,8 +212,11 @@ function runStopReview(cwd, input = {}, env = process.env) {
   }
 }
 
-function main() {
+async function main() {
   const input = readHookInput();
+  if (!shouldRunStopReview(input)) {
+    return;
+  }
   const cwd = resolveHookCwd(input);
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const config = getConfig(workspaceRoot);
@@ -174,7 +239,7 @@ function main() {
     return;
   }
 
-  const review = runStopReview(cwd, input);
+  const review = await runStopReview(cwd, input);
   if (!review.ok) {
     emitDecision({
       decision: "block",
@@ -200,11 +265,9 @@ const isDirectRun =
     process.argv[1].endsWith("stop-review-gate-hook.js"));
 
 if (isDirectRun) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
-  }
+  });
 }

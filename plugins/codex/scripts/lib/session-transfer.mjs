@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ensureAbsolutePath } from "./fs.mjs";
-import { resolveGrokHome } from "./host-env.mjs";
+import { encodeGrokSessionGroup, resolveGrokHome } from "./host-env.mjs";
 
 export const TRANSCRIPT_PATH_ENV = "CODEX_COMPANION_TRANSCRIPT_PATH";
 
@@ -23,10 +23,6 @@ function resolveUserPath(cwd, value) {
 function isInsideDir(parentDir, candidatePath) {
   const relative = path.relative(parentDir, candidatePath);
   return !(relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
-}
-
-function encodeGrokSessionGroup(cwd) {
-  return encodeURIComponent(path.resolve(cwd));
 }
 
 function truncateText(text, max = TOOL_RESULT_MAX_CHARS) {
@@ -305,4 +301,3 @@ export function resolveSessionTransferSource(cwd, options = {}) {
     converted: true
   };
 }
-

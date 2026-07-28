@@ -48,6 +48,22 @@ Reload plugins (`r` in the Plugins tab, or start a new session), then run:
 /codex:setup
 ```
 
+Local and marketplace installs are copied snapshots. After pulling a newer plugin version, refresh the installed copy before reloading:
+
+```bash
+grok plugin marketplace update codex-plugin-grok
+grok plugin update codex
+```
+
+For local development, this repository can safely find the matching `codex-plugin-grok` installed snapshot from Grok's registry and show a dry-run:
+
+```bash
+npm run sync-installed
+npm run sync-installed -- --apply
+```
+
+Add `--update-marketplace` to refresh a copied local marketplace tree as well. If the marketplace already points at this checkout, the script leaves it alone and reports that only a reload is needed. The script never reloads Grok automatically; reload plugins (`r` in the Plugins tab) or start a new session after `--apply`.
+
 `/codex:setup` reports whether Codex is ready. If Codex is missing and npm is available, it can offer to install Codex for you.
 
 If you prefer to install Codex yourself:
@@ -172,9 +188,11 @@ Check Codex readiness; optionally toggle the stop-time review gate:
 | Hook envelopes | Grok camelCase (`sessionId`, `lastAssistantMessage`, `hookEventName`) |
 | Tools in commands/skills | `run_terminal_command`, `spawn_subagent`, `ask_user_question` |
 | Slash entrypoints | `commands/` + Grok-native `skills/<name>/SKILL.md` |
-| Background work | Prefer Grok shell `background: true` (completion callbacks). Companion `--background` still works for job status/result |
+| Background work | Slash review/rescue flows use Grok shell `background: true` for completion callbacks. Direct `task --background` is detached and must be checked with status/result |
 | Session transfer | Source = Grok sessions; staging under `~/.claude/projects/-grok-codex-transfer/` for Codex import only (auto-created; **no Claude install**) |
 | Marketplace layout | `.grok-plugin/marketplace.json` only |
+
+The exact environment, stdin fields, event behavior, transcript layout, and Stop timeout contract are documented in [Grok hook contract](plugins/codex/docs/grok-hooks.md). In particular, production envelopes use Grok camelCase; `hook_event_name` and `session_id` are not recognized.
 
 ### Pure Grok machine checklist
 
@@ -204,6 +222,10 @@ skills = true
 
 That flag enables Claude-compat skill loading for plugin slash entries; it is not the same as installing Claude Code. Then reload plugins (`r` in the Plugins tab).
 
+**Q: `grok inspect` resolves `codex` from `~/.claude/plugins/...` instead of `~/.grok/installed-plugins/...`?**
+
+A: The official plugin and this fork both use the `codex` name to provide the `/codex:*` namespace, and Grok deduplicates same-name plugins. They are not intended to coexist in Grok discovery. Remove or disable the legacy official plugin for Grok, run `grok plugin update codex`, reload, and verify the selected path with `grok inspect --json`.
+
 ## Direct CLI (without slash commands)
 
 Grok can also call the companion script or `codex exec` directly:
@@ -211,7 +233,7 @@ Grok can also call the companion script or `codex exec` directly:
 ```bash
 node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the failing test"
 # short prompt as args:
-codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
+codex exec -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
 ```
 
 **Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Prefer a **portable** output dir (`<repo>/tmp/codex-out/`), not a machine-local path.
@@ -222,14 +244,18 @@ Bundled helper (recommended on Windows):
 # From the installed/plugin scripts directory, or a checkout of this repo:
 pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "fix the failing test" -Effort medium
 pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -PromptFile <repo>/tmp/codex-out/spec.md -OutName job.md -Effort high
+# Optional only when that named Codex profile exists:
+pwsh -File plugins/codex/scripts/invoke-codex.ps1 -Repo <repo> -Prompt "review" -Profile codex-api
 ```
+
+The helper uses Codex's default configuration unless `-Profile` is supplied. It prefers the npm `codex.cmd` shim on Windows so PowerShell execution policy does not block `codex.ps1`.
 
 Or pipe manually:
 
 ```powershell
 $out = Join-Path <repo> "tmp/codex-out"
 New-Item -ItemType Directory -Force $out | Out-Null
-Get-Content -Raw (Join-Path $out "spec.md") | codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o (Join-Path $out "out.md") -
+Get-Content -Raw (Join-Path $out "spec.md") | codex exec -c model_reasoning_effort="medium" -C <repo> -o (Join-Path $out "out.md") -
 ```
 
 ## Develop / test
@@ -237,6 +263,7 @@ Get-Content -Raw (Join-Path $out "spec.md") | codex exec --profile codex-api -c 
 ```bash
 npm test
 node scripts/bump-version.mjs --check
+npm run sync-installed
 grok plugin validate ./plugins/codex
 ```
 

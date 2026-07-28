@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+import { makeTempDir } from "./helpers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
@@ -158,6 +161,8 @@ test("shipped docs avoid machine-local absolute user paths", () => {
   assert.doesNotMatch(readme, /C:\/Users\/PC/i);
   assert.doesNotMatch(agent, /C:\/Users\/PC/i);
   assert.match(readme, /\/path\/to\/codex-plugin-grok|path\/to\/codex-plugin-grok/);
+  assert.match(readme, /grok plugin update codex/);
+  assert.match(readme, /deduplicates same-name plugins/i);
 });
 
 test("setup command can offer Codex install and still points users to codex login", () => {
@@ -203,4 +208,84 @@ test("Windows invoke-codex helper ships and avoids bash stdin redirection", () =
   assert.match(source, /tmp\/codex-out|tmp\\codex-out|Join-Path.*tmp/);
   assert.doesNotMatch(source, /codex exec[^\n]*<\s/);
   assert.match(source, /PromptFile/);
+  assert.doesNotMatch(source, /\[string\]\$Profile\s*=\s*["']codex-api["']/i);
+  assert.match(source, /if \(\$Profile\)/);
+  assert.ok(
+    source.indexOf('npm\\codex.cmd') < source.indexOf('Get-Command codex -ErrorAction'),
+    "codex.cmd should be preferred over codex.ps1"
+  );
+});
+
+test("Windows invoke-codex helper omits --profile unless explicitly requested", { skip: process.platform !== "win32" }, () => {
+  const repo = makeTempDir("codex-pwsh-helper-");
+  const helper = path.join(PLUGIN_ROOT, "scripts", "invoke-codex.ps1");
+  const fakeCodex = path.join(repo, "fake-codex.cmd");
+  const argsFile = path.join(repo, "args.txt");
+  fs.writeFileSync(
+    fakeCodex,
+    [
+      "@echo off",
+      "setlocal EnableDelayedExpansion",
+      "set \"outFile=\"",
+      ":loop",
+      "if \"%~1\"==\"\" goto done",
+      ">>\"%CODEX_TEST_ARGS%\" echo %~1",
+      "if \"%~1\"==\"-o\" set \"outFile=%~2\"",
+      "shift",
+      "goto loop",
+      ":done",
+      "if defined outFile >\"!outFile!\" echo fake result",
+      "exit /b 0",
+      ""
+    ].join("\r\n"),
+    "utf8"
+  );
+
+  const invoke = (extra = []) =>
+    spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        helper,
+        "-Repo",
+        repo,
+        "-Prompt",
+        "status only",
+        "-CodexCmd",
+        fakeCodex,
+        ...extra
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, CODEX_TEST_ARGS: argsFile },
+        encoding: "utf8",
+        windowsHide: true
+      }
+    );
+
+  const withoutProfile = invoke(["-OutName", "default.md"]);
+  assert.equal(withoutProfile.status, 0, withoutProfile.stderr);
+  let captured = fs.readFileSync(argsFile, "utf8");
+  assert.doesNotMatch(captured, /^--profile$/m);
+  assert.equal(fs.existsSync(path.join(repo, "tmp", "codex-out", "default.md")), true);
+
+  fs.writeFileSync(argsFile, "", "utf8");
+  const withProfile = invoke(["-Profile", "codex-api", "-OutName", "profile.md"]);
+  assert.equal(withProfile.status, 0, withProfile.stderr);
+  captured = fs.readFileSync(argsFile, "utf8");
+  assert.match(captured, /^--profile\r?\ncodex-api$/m);
+});
+
+test("build preflight uses a cross-platform Node generator", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const generator = fs.readFileSync(path.join(ROOT, "scripts", "generate-app-server-types.mjs"), "utf8");
+  assert.equal(packageJson.scripts.prebuild, "node scripts/generate-app-server-types.mjs");
+  assert.doesNotMatch(packageJson.scripts.prebuild, /mkdir\s+-p/);
+  assert.match(generator, /mkdirSync/);
+  assert.match(generator, /resolveCommandInvocation\("codex", codexArgs\)/);
+  assert.match(generator, /spawnSync\(invocation\.command, invocation\.args/);
+  assert.match(generator, /shell:\s*false/);
+  assert.doesNotMatch(generator, /process\.env\.ComSpec/);
+  assert.doesNotMatch(generator, /shell:\s*true/);
 });

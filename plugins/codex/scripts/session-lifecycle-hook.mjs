@@ -19,6 +19,7 @@ import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import {
   appendHostEnvVar,
   COMPANION_SESSION_ID_ENV,
+  encodeGrokSessionGroup,
   resolveHookCwd,
   resolveHookEventName,
   resolveHookTranscriptPathField,
@@ -80,7 +81,7 @@ function resolveTranscriptPath(input, sessionId) {
   const cwd = resolveHookCwd(input);
   // Grok sessions live under ~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl
   if (sessionId && cwd) {
-    const encoded = encodeURIComponent(String(cwd));
+    const encoded = encodeGrokSessionGroup(cwd);
     const candidate = [
       process.env.GROK_HOME,
       process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.grok` : null,
