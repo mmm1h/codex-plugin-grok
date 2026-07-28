@@ -323,7 +323,15 @@ test("transfer fails visibly when native import completes without a ledger recor
   const home = makeTempDir();
   const repo = path.join(home, "repo");
   const binDir = makeTempDir();
+  const stagingDir = path.join(home, "transfer-staging");
   fs.mkdirSync(repo, { recursive: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
+  for (let index = 0; index < 22; index += 1) {
+    const staged = path.join(stagingDir, `grok-transfer-old-${String(index).padStart(2, "0")}.jsonl`);
+    fs.writeFileSync(staged, "{}\n", "utf8");
+    const modified = new Date(Date.now() - (index + 1) * 60 * 1000);
+    fs.utimesSync(staged, modified, modified);
+  }
   installFakeCodex(binDir, "external-import-fails");
   initGitRepo(repo);
   const sourcePath = writeGrokChatHistory(home, repo, "session-fail", [
@@ -332,7 +340,10 @@ test("transfer fails visibly when native import completes without a ledger recor
 
   const result = run("node", [SCRIPT, "transfer", "--source", sourcePath], {
     cwd: repo,
-    env: grokHomeEnv(home, binDir)
+    env: {
+      ...grokHomeEnv(home, binDir),
+      CODEX_TRANSFER_STAGING_DIR: stagingDir
+    }
   });
 
   assert.notEqual(result.status, 0);
@@ -340,6 +351,10 @@ test("transfer fails visibly when native import completes without a ledger recor
   assert.match(result.stderr, /Staging path:/);
   assert.match(result.stderr, /Ledger path:/);
   assert.match(result.stderr, /CODEX_TRANSFER_STAGING_DIR/);
+  assert.equal(
+    fs.readdirSync(stagingDir).filter((name) => /^grok-transfer-.*\.jsonl$/.test(name)).length,
+    20
+  );
 });
 
 test("transfer rejects sources outside Grok sessions directories", () => {
@@ -607,6 +622,46 @@ test("task-resume-candidate returns the latest rescue thread from the current se
   assert.equal(payload.sessionId, "sess-current");
   assert.equal(payload.candidate.id, "task-current");
   assert.equal(payload.candidate.threadId, "thr_current");
+});
+
+test("task-resume-candidate reconciles an orphaned running task before selection", () => {
+  const workspace = makeTempDir();
+  const stateDir = resolveStateDir(workspace);
+  fs.mkdirSync(path.join(stateDir, "jobs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, "state.json"),
+    `${JSON.stringify({
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: [{
+        id: "task-orphaned-resume",
+        status: "running",
+        title: "Codex Task",
+        jobClass: "task",
+        sessionId: "sess-current",
+        threadId: "thr_orphaned",
+        pid: 0,
+        createdAt: "2020-01-01T10:00:00.000Z",
+        updatedAt: "2020-01-01T10:00:01.000Z"
+      }]
+    }, null, 2)}\n`,
+    "utf8"
+  );
+
+  const result = run("node", [SCRIPT, "task-resume-candidate", "--json"], {
+    cwd: workspace,
+    env: {
+      ...process.env,
+      CODEX_COMPANION_SESSION_ID: "sess-current"
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.available, true);
+  assert.equal(payload.candidate.id, "task-orphaned-resume");
+  assert.equal(payload.candidate.status, "failed");
+  assert.equal(payload.candidate.threadId, "thr_orphaned");
 });
 
 test("task --resume-last does not resume a task from another host session", () => {

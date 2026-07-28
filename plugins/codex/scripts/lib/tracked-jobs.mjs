@@ -4,6 +4,8 @@ import process from "node:process";
 import { readJobFile, resolveJobFile, resolveJobLogFile, upsertJob, writeJobFile } from "./state.mjs";
 
 export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
+export const DEFAULT_STORED_JOB_RETRY_TIMEOUT_MS = 2000;
+const DEFAULT_STORED_JOB_RETRY_INTERVAL_MS = 50;
 
 export function nowIso() {
   return new Date().toISOString();
@@ -69,7 +71,7 @@ export function createJobRecord(base, options = {}) {
   };
 }
 
-export function createJobProgressUpdater(workspaceRoot, jobId) {
+export function createJobProgressUpdater(workspaceRoot, jobId, options = {}) {
   let lastPhase = null;
   let lastThreadId = null;
   let lastTurnId = null;
@@ -101,18 +103,29 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
       return;
     }
 
-    upsertJob(workspaceRoot, patch);
+    try {
+      const state = upsertJob(workspaceRoot, patch, {
+        critical: false,
+        ...(options.stateOptions ?? {})
+      });
+      if (!state) {
+        return;
+      }
 
-    const jobFile = resolveJobFile(workspaceRoot, jobId);
-    if (!fs.existsSync(jobFile)) {
-      return;
+      const jobFile = resolveJobFile(workspaceRoot, jobId);
+      if (!fs.existsSync(jobFile)) {
+        return;
+      }
+
+      const storedJob = readJobFile(jobFile);
+      writeJobFile(workspaceRoot, jobId, {
+        ...storedJob,
+        ...patch
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Warning: skipped a non-critical Codex progress update: ${message}\n`);
     }
-
-    const storedJob = readJobFile(jobFile);
-    writeJobFile(workspaceRoot, jobId, {
-      ...storedJob,
-      ...patch
-    });
   };
 }
 
@@ -139,6 +152,51 @@ function readStoredJobOrNull(workspaceRoot, jobId) {
     return null;
   }
   return readJobFile(jobFile);
+}
+
+export async function readStoredJobWithRetry(workspaceRoot, jobId, options = {}) {
+  const readImpl = options.readImpl ?? readStoredJobOrNull;
+  const sleepImpl = options.sleepImpl ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const now = options.now ?? Date.now;
+  const timeoutMs = Math.max(0, Number(options.timeoutMs ?? DEFAULT_STORED_JOB_RETRY_TIMEOUT_MS));
+  const retryIntervalMs = Math.max(
+    1,
+    Number(options.retryIntervalMs ?? DEFAULT_STORED_JOB_RETRY_INTERVAL_MS)
+  );
+  const deadline = now() + timeoutMs;
+
+  while (true) {
+    try {
+      const storedJob = readImpl(workspaceRoot, jobId);
+      if (storedJob) {
+        return storedJob;
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      return null;
+    }
+    await sleepImpl(Math.min(retryIntervalMs, remainingMs));
+  }
+}
+
+export function queueBackgroundJob(job, request, spawnWorker) {
+  const queuedRecord = {
+    ...job,
+    status: "queued",
+    phase: "queued",
+    pid: null,
+    request
+  };
+  writeJobFile(job.workspaceRoot, job.id, queuedRecord);
+  upsertJob(job.workspaceRoot, queuedRecord);
+  const child = spawnWorker();
+  return { child, queuedRecord };
 }
 
 export async function runTrackedJob(job, runner, options = {}) {

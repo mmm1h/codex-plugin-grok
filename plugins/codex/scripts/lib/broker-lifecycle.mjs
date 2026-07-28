@@ -6,6 +6,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createBrokerEndpoint, parseBrokerEndpoint } from "./broker-endpoint.mjs";
+import { terminateProcessTree } from "./process.mjs";
 import { resolveStateDir } from "./state.mjs";
 
 export const PID_FILE_ENV = "CODEX_COMPANION_APP_SERVER_PID_FILE";
@@ -121,6 +122,7 @@ async function isBrokerEndpointReady(endpoint) {
 }
 
 export async function ensureBrokerSession(cwd, options = {}) {
+  const killProcess = options.killProcess ?? terminateProcessTree;
   const existing = loadBrokerSession(cwd);
   if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
     return existing;
@@ -133,7 +135,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile: existing.logFile ?? null,
       sessionDir: existing.sessionDir ?? null,
       pid: existing.pid ?? null,
-      killProcess: options.killProcess ?? null
+      killProcess
     });
     clearBrokerSession(cwd);
   }
@@ -147,7 +149,8 @@ export async function ensureBrokerSession(cwd, options = {}) {
     options.scriptPath ??
     fileURLToPath(new URL("../app-server-broker.mjs", import.meta.url));
 
-  const child = spawnBrokerProcess({
+  const spawnBrokerProcessImpl = options.spawnBrokerProcessImpl ?? spawnBrokerProcess;
+  const child = spawnBrokerProcessImpl({
     scriptPath,
     cwd,
     endpoint,
@@ -156,7 +159,8 @@ export async function ensureBrokerSession(cwd, options = {}) {
     env: options.env ?? process.env
   });
 
-  const ready = await waitForBrokerEndpoint(
+  const waitForBrokerEndpointImpl = options.waitForBrokerEndpointImpl ?? waitForBrokerEndpoint;
+  const ready = await waitForBrokerEndpointImpl(
     endpoint,
     options.timeoutMs ?? resolveBrokerStartupTimeoutMs(options.env ?? process.env)
   );
@@ -167,7 +171,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile,
       sessionDir,
       pid: child.pid ?? null,
-      killProcess: options.killProcess ?? null,
+      killProcess,
       preserveLog: true
     });
     process.stderr.write(

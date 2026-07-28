@@ -145,7 +145,7 @@ export function createArgsPath(commandName, env = process.env) {
   return path.join(argsDir, `${safeCommand}-${safeSession}-${randomUUID()}.txt`);
 }
 
-export function readValidatedArgsFile(filePath, env = process.env) {
+export function readValidatedArgsFile(filePath, env = process.env, options = {}) {
   if (!path.isAbsolute(filePath)) {
     throw new Error("`--args-file` path must be absolute.");
   }
@@ -184,10 +184,6 @@ export function readValidatedArgsFile(filePath, env = process.env) {
     if (!isSameFile(initialStat, openedStat)) {
       throw new Error("`--args-file` changed during validation; refusing to read it.");
     }
-    if (openedStat.size > ARGS_FILE_MAX_BYTES) {
-      throw new Error("`--args-file` exceeds the 64 KiB size limit.");
-    }
-
     const finalCanonicalFile = realpathArgsFile(filePath);
     const finalStat = lstatArgsFile(filePath);
     assertRegularArgsFile(finalStat);
@@ -197,6 +193,11 @@ export function readValidatedArgsFile(filePath, env = process.env) {
       !isSameFile(openedStat, finalStat)
     ) {
       throw new Error("`--args-file` changed during validation; refusing to read it.");
+    }
+
+    options.onValidated?.(filePath);
+    if (openedStat.size > ARGS_FILE_MAX_BYTES) {
+      throw new Error("`--args-file` exceeds the 64 KiB size limit.");
     }
 
     return readLimitedUtf8(descriptor);
@@ -215,7 +216,7 @@ export function removeArgsFiles(filePaths) {
     try {
       fs.unlinkSync(filePath);
     } catch {
-      // Consumption is one-shot; deletion remains best effort on every path.
+      // Validated argument files are one-shot; deletion remains best effort.
     }
   }
 }

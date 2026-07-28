@@ -128,8 +128,10 @@ test("--args-file matches legacy raw positional parsing for options and focus te
   installFakeCodex(fileBinDir);
   const directEnv = buildArgsEnv(directPluginData, buildEnv(directBinDir));
   const fileEnv = buildArgsEnv(filePluginData, buildEnv(fileBinDir));
-  const rawArguments =
-    '--base main --background "focus on retry boundaries with spaces"';
+  const focusText =
+    "challenge the \"caching\" design; it's broken, so don't rewrite C:\\src\\app or \\d+; " +
+    "check $(whoami), `whoami`, and ; rm -rf /";
+  const rawArguments = `--base main --background ${focusText}`;
 
   const direct = run(
     process.execPath,
@@ -154,9 +156,64 @@ test("--args-file matches legacy raw positional parsing for options and focus te
     fs.readFileSync(path.join(fileBinDir, "fake-codex-state.json"), "utf8")
   );
   assert.equal(fileState.lastTurnStart.prompt, directState.lastTurnStart.prompt);
-  assert.match(fileState.lastTurnStart.prompt, /focus on retry boundaries with spaces/);
+  assert.equal(fileState.lastTurnStart.prompt.includes(`User focus: ${focusText}\n`), true);
   assert.doesNotMatch(fileState.lastTurnStart.prompt, /--background/);
   assert.equal(fs.existsSync(argsFile), false);
+});
+
+test("task args-file preserves the rescue task text exactly", () => {
+  const binDir = makeTempDir();
+  const pluginDataDir = makeTempDir("codex-task-args-");
+  installFakeCodex(binDir);
+  const env = buildArgsEnv(pluginDataDir, buildEnv(binDir));
+  const argsFile = requestArgsPath("task", env);
+  const taskText =
+    "don't rewrite the \"task\" at C:\\src\\app or \\d+; " +
+    "inspect $(whoami), `whoami`, and ; rm -rf /";
+  fs.writeFileSync(argsFile, `--fresh ${taskText}`, "utf8");
+
+  const result = run(
+    process.execPath,
+    [SCRIPT, "task", "--json", "--args-file", argsFile],
+    { cwd: ROOT, env }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(argsFile), false);
+  const fakeState = JSON.parse(
+    fs.readFileSync(path.join(binDir, "fake-codex-state.json"), "utf8")
+  );
+  assert.equal(fakeState.lastTurnStart.prompt, taskText);
+});
+
+test("args-file keeps job ids positional and --source paths as flag values", () => {
+  const pluginDataDir = makeTempDir("codex-structured-args-");
+  const env = buildArgsEnv(pluginDataDir);
+
+  const statusArgsFile = requestArgsPath("status", env);
+  fs.writeFileSync(statusArgsFile, "missing-job --json", "utf8");
+  const status = run(
+    process.execPath,
+    [SCRIPT, "status", "--args-file", statusArgsFile],
+    { cwd: ROOT, env }
+  );
+  assert.notEqual(status.status, 0);
+  assert.match(status.stderr, /No job found for "missing-job"/);
+  assert.doesNotMatch(status.stderr, /missing-job --json/);
+  assert.equal(fs.existsSync(statusArgsFile), false);
+
+  const sourcePath = path.join(makeTempDir("codex source path-"), "missing session.jsonl");
+  const transferArgsFile = requestArgsPath("transfer", env);
+  fs.writeFileSync(transferArgsFile, `--source "${sourcePath}" --json`, "utf8");
+  const transfer = run(
+    process.execPath,
+    [SCRIPT, "transfer", "--args-file", transferArgsFile],
+    { cwd: ROOT, env }
+  );
+  assert.notEqual(transfer.status, 0);
+  assert.match(transfer.stderr, /Session file not found/);
+  assert.match(transfer.stderr, new RegExp(sourcePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(fs.existsSync(transferArgsFile), false);
 });
 
 test("--args-file is deleted when parsing fails", () => {
@@ -176,7 +233,7 @@ test("--args-file is deleted when parsing fails", () => {
   assert.equal(fs.existsSync(argsFile), false);
 });
 
-test("--args-file rejects paths outside the allowed directory and deletes them", () => {
+test("--args-file rejects paths outside the allowed directory without deleting them", () => {
   const pluginDataDir = makeTempDir("codex-args-outside-data-");
   const outsideDir = makeTempDir("codex-args-outside-");
   const outsideFile = path.join(outsideDir, "outside.txt");
@@ -191,7 +248,8 @@ test("--args-file rejects paths outside the allowed directory and deletes them",
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /inside the allowed arguments directory/);
-  assert.equal(fs.existsSync(outsideFile), false);
+  assert.equal(fs.existsSync(outsideFile), true);
+  assert.equal(fs.readFileSync(outsideFile, "utf8"), "--json");
 });
 
 test("--args-file rejects a sibling directory with the same path prefix", () => {
@@ -210,7 +268,7 @@ test("--args-file rejects a sibling directory with the same path prefix", () => 
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /inside the allowed arguments directory/);
-  assert.equal(fs.existsSync(siblingFile), false);
+  assert.equal(fs.existsSync(siblingFile), true);
 });
 
 test(
@@ -233,11 +291,11 @@ test(
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /inside the allowed arguments directory/);
-    assert.equal(fs.existsSync(outsideFile), false);
+    assert.equal(fs.existsSync(outsideFile), true);
   }
 );
 
-test("--args-file rejects and unlinks symbolic links", (t) => {
+test("--args-file rejects symbolic links without unlinking them", (t) => {
   const pluginDataDir = makeTempDir("codex-args-symlink-");
   const env = buildArgsEnv(pluginDataDir);
   const linkPath = requestArgsPath("setup", env);
@@ -261,7 +319,7 @@ test("--args-file rejects and unlinks symbolic links", (t) => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /regular file, not a symbolic link/);
-  assert.equal(fs.existsSync(linkPath), false);
+  assert.equal(fs.existsSync(linkPath), true);
   assert.equal(fs.readFileSync(targetPath, "utf8"), "--json");
 });
 
@@ -340,7 +398,7 @@ test("--args-file refuses a file replaced between validation and open", (t) => {
   }
 });
 
-test("--args-file rejects relative paths and still deletes the file", () => {
+test("--args-file rejects relative paths without deleting the file", () => {
   const pluginDataDir = makeTempDir("codex-args-relative-");
   const env = buildArgsEnv(pluginDataDir);
   const argsFile = requestArgsPath("setup", env);
@@ -356,7 +414,7 @@ test("--args-file rejects relative paths and still deletes the file", () => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /path must be absolute/);
-  assert.equal(fs.existsSync(argsFile), false);
+  assert.equal(fs.existsSync(argsFile), true);
 });
 
 test("shell metacharacters and malformed quoting remain inert focus data", () => {

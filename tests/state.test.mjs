@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 
 import { makeTempDir } from "./helpers.mjs";
 import {
@@ -14,8 +15,16 @@ import {
   resolveStateDir,
   resolveStateFile,
   saveState,
+  updateState,
+  upsertJob,
   writeJobFile
 } from "../plugins/codex/scripts/lib/state.mjs";
+import {
+  createJobProgressUpdater,
+  queueBackgroundJob,
+  readStoredJobWithRetry,
+  runTrackedJob
+} from "../plugins/codex/scripts/lib/tracked-jobs.mjs";
 import {
   buildStatusSnapshot,
   resolveCancelableJob
@@ -257,39 +266,177 @@ test("job-control readers stop treating an orphaned job as active", () => {
   assert.equal(snapshot.latestFinished.phase, "stale");
 });
 
-test("saveState with a stale snapshot does not delete a newer job's artifacts", () => {
+test("queueBackgroundJob persists the request before spawning a worker", () => {
   const workspace = makeTempDir();
-  const firstJob = {
-    id: "task-a",
-    status: "completed",
-    createdAt: "2026-07-28T10:00:00.000Z",
-    updatedAt: "2026-07-28T10:01:00.000Z"
+  const job = {
+    id: "task-queued",
+    workspaceRoot: workspace,
+    title: "Codex Task"
   };
-  saveState(workspace, {
-    version: 1,
-    config: { stopReviewGate: false },
-    jobs: [firstJob]
-  });
-  const staleSnapshot = loadState(workspace);
+  const request = { prompt: "do not lose this task" };
+  let spawned = false;
 
-  const secondLogFile = resolveJobLogFile(workspace, "task-b");
-  const secondJob = {
-    id: "task-b",
-    status: "running",
-    pid: process.pid,
-    logFile: secondLogFile,
-    createdAt: "2026-07-28T10:02:00.000Z",
-    updatedAt: "2026-07-28T10:02:01.000Z"
-  };
-  fs.writeFileSync(secondLogFile, "running\n", "utf8");
-  const secondJobFile = writeJobFile(workspace, secondJob.id, secondJob);
-  saveState(workspace, {
-    ...staleSnapshot,
-    jobs: [secondJob, ...staleSnapshot.jobs]
+  const queued = queueBackgroundJob(job, request, () => {
+    spawned = true;
+    const stored = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
+    assert.deepEqual(stored.request, request);
+    assert.deepEqual(loadState(workspace).jobs.find((candidate) => candidate.id === job.id)?.request, request);
+    return { pid: 1234 };
   });
 
-  saveState(workspace, staleSnapshot);
+  assert.equal(spawned, true);
+  assert.equal(queued.queuedRecord.status, "queued");
+  assert.equal(queued.queuedRecord.pid, null);
+});
 
-  assert.equal(fs.existsSync(secondJobFile), true);
-  assert.equal(fs.existsSync(secondLogFile), true);
+test("readStoredJobWithRetry survives controlled worker-first scheduling", async () => {
+  let attempts = 0;
+  let clock = 0;
+  const expected = { id: "task-visible", request: { prompt: "eventually visible" } };
+
+  const stored = await readStoredJobWithRetry("workspace", expected.id, {
+    timeoutMs: 2000,
+    retryIntervalMs: 50,
+    now: () => clock,
+    sleepImpl: async (milliseconds) => {
+      clock += milliseconds;
+    },
+    readImpl() {
+      attempts += 1;
+      if (attempts === 1) {
+        return null;
+      }
+      if (attempts === 2) {
+        const error = new Error("not visible yet");
+        error.code = "ENOENT";
+        throw error;
+      }
+      return expected;
+    }
+  });
+
+  assert.deepEqual(stored, expected);
+  assert.equal(attempts, 3);
+  assert.equal(clock, 100);
+});
+
+test("critical state writes fail closed when a live lock exceeds the budget", () => {
+  const workspace = makeTempDir();
+  upsertJob(workspace, { id: "task-existing", status: "queued" });
+  const lockFile = path.join(resolveStateDir(workspace), "state.lock");
+  fs.writeFileSync(lockFile, "held-by-test", "utf8");
+
+  try {
+    assert.throws(
+      () => updateState(workspace, (state) => state.jobs.push({ id: "task-unlocked" }), { lockTimeoutMs: 5 }),
+      /refusing an unlocked state write/
+    );
+  } finally {
+    fs.unlinkSync(lockFile);
+  }
+
+  assert.deepEqual(loadState(workspace).jobs.map((job) => job.id), ["task-existing"]);
+});
+
+test("progress lock timeout skips the update without interrupting job completion", async () => {
+  const workspace = makeTempDir();
+  upsertJob(workspace, { id: "task-sentinel", status: "completed" });
+  const job = {
+    id: "task-progress",
+    workspaceRoot: workspace,
+    title: "Codex Task"
+  };
+  const progress = createJobProgressUpdater(workspace, job.id, {
+    stateOptions: { lockTimeoutMs: 5 }
+  });
+
+  const execution = await runTrackedJob(job, async () => {
+    const lockFile = path.join(resolveStateDir(workspace), "state.lock");
+    fs.writeFileSync(lockFile, "held-by-test", "utf8");
+    try {
+      assert.doesNotThrow(() => progress({ phase: "thinking", threadId: "thr-skipped" }));
+    } finally {
+      fs.unlinkSync(lockFile);
+    }
+    return {
+      exitStatus: 0,
+      threadId: "thr-complete",
+      turnId: "turn-complete",
+      summary: "completed after skipped progress",
+      payload: { ok: true },
+      rendered: "done\n"
+    };
+  });
+
+  assert.equal(execution.exitStatus, 0);
+  const jobs = loadState(workspace).jobs;
+  assert.equal(jobs.find((candidate) => candidate.id === job.id)?.status, "completed");
+  assert.equal(jobs.find((candidate) => candidate.id === job.id)?.threadId, "thr-complete");
+  assert.equal(jobs.some((candidate) => candidate.id === "task-sentinel"), true);
+  const stored = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
+  assert.equal(stored.status, "completed");
+  assert.equal(stored.threadId, "thr-complete");
+});
+
+test("concurrent state writers retain every new job and artifact", async () => {
+  const workspace = makeTempDir();
+  const stateModule = new URL("../plugins/codex/scripts/lib/state.mjs", import.meta.url).href;
+  const jobIds = Array.from({ length: 8 }, (_, index) => `task-concurrent-${index}`);
+
+  await Promise.all(jobIds.map((jobId) => new Promise((resolve, reject) => {
+    const script = [
+      `import { upsertJob, writeJobFile } from ${JSON.stringify(stateModule)};`,
+      `const workspace = ${JSON.stringify(workspace)};`,
+      `const job = { id: ${JSON.stringify(jobId)}, status: "queued" };`,
+      "writeJobFile(workspace, job.id, job);",
+      "upsertJob(workspace, job);"
+    ].join("\n");
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`writer ${jobId} failed with ${code}: ${stderr}`));
+      }
+    });
+  })));
+
+  const savedIds = new Set(loadState(workspace).jobs.map((job) => job.id));
+  assert.deepEqual(savedIds, new Set(jobIds));
+  for (const jobId of jobIds) {
+    assert.equal(fs.existsSync(resolveJobFile(workspace, jobId)), true);
+  }
+});
+
+test("atomic state writes retry transient Windows rename errors", () => {
+  const workspace = makeTempDir();
+  const originalRenameSync = fs.renameSync;
+  let attempts = 0;
+  fs.renameSync = function transientRename(source, destination) {
+    attempts += 1;
+    if (attempts < 3) {
+      const error = new Error("temporarily busy");
+      error.code = attempts === 1 ? "EPERM" : "EBUSY";
+      throw error;
+    }
+    return originalRenameSync.call(fs, source, destination);
+  };
+
+  try {
+    writeJobFile(workspace, "task-rename", { id: "task-rename", status: "queued" });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(attempts, 3);
+  assert.equal(JSON.parse(fs.readFileSync(resolveJobFile(workspace, "task-rename"), "utf8")).status, "queued");
 });

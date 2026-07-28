@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_BROKER_STARTUP_TIMEOUT_MS,
+  ensureBrokerSession,
   resolveBrokerStartupTimeoutMs,
   teardownBrokerSession
 } from "../plugins/codex/scripts/lib/broker-lifecycle.mjs";
@@ -51,4 +52,28 @@ test("resolveBrokerStartupTimeoutMs accepts a positive environment override", ()
     resolveBrokerStartupTimeoutMs({ CODEX_BROKER_STARTUP_TIMEOUT_MS: "invalid" }),
     DEFAULT_BROKER_STARTUP_TIMEOUT_MS
   );
+});
+
+test("ensureBrokerSession terminates a timed-out child tree and preserves its log", async () => {
+  const workspace = makeTempDir("broker-timeout-workspace-");
+  let killedPid = null;
+  let spawnedLogFile = null;
+
+  const session = await ensureBrokerSession(workspace, {
+    spawnBrokerProcessImpl({ logFile }) {
+      spawnedLogFile = logFile;
+      fs.writeFileSync(logFile, "startup timed out\n", "utf8");
+      return { pid: 4242 };
+    },
+    waitForBrokerEndpointImpl: async () => false,
+    killProcess(pid) {
+      killedPid = pid;
+    }
+  });
+
+  assert.equal(session, null);
+  assert.equal(killedPid, 4242);
+  assert.equal(fs.existsSync(spawnedLogFile), true);
+  assert.equal(fs.readFileSync(spawnedLogFile, "utf8"), "startup timed out\n");
+  fs.rmSync(path.dirname(spawnedLogFile), { recursive: true, force: true });
 });

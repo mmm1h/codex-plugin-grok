@@ -12,13 +12,15 @@ const STATE_FILE_NAME = "state.json";
 const STATE_LOCK_FILE_NAME = "state.lock";
 const JOBS_DIR_NAME = "jobs";
 const MAX_JOBS = 50;
-const STATE_LOCK_TIMEOUT_MS = 2000;
+const CRITICAL_STATE_LOCK_TIMEOUT_MS = 10000;
+const BEST_EFFORT_STATE_LOCK_TIMEOUT_MS = 250;
 const STATE_LOCK_STALE_MS = 10000;
 const STATE_LOCK_RETRY_MIN_MS = 20;
 const STATE_LOCK_RETRY_MAX_MS = 50;
 const STALE_JOB_GRACE_PERIOD_MS = 30000;
 const STALE_JOB_ERROR_MESSAGE =
   "Codex job process is no longer running (orphaned); marked stale.";
+const ATOMIC_RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
 const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 function resolvePluginDataDir(env = process.env) {
@@ -127,10 +129,10 @@ function removeLockIfStale(lockFile) {
   }
 }
 
-function acquireStateLock(cwd) {
+function acquireStateLock(cwd, timeoutMs) {
   ensureStateDir(cwd);
   const lockFile = resolveStateLockFile(cwd);
-  const deadline = Date.now() + STATE_LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 
   while (true) {
@@ -181,12 +183,24 @@ function releaseStateLock(lock) {
   }
 }
 
-function withStateLock(cwd, operation) {
-  const lock = acquireStateLock(cwd);
+function resolveLockTimeoutMs(options, critical) {
+  const configured = Number(options.lockTimeoutMs);
+  if (Number.isFinite(configured) && configured >= 0) {
+    return configured;
+  }
+  return critical ? CRITICAL_STATE_LOCK_TIMEOUT_MS : BEST_EFFORT_STATE_LOCK_TIMEOUT_MS;
+}
+
+function withStateLock(cwd, operation, options = {}) {
+  const critical = options.critical !== false;
+  const lock = acquireStateLock(cwd, resolveLockTimeoutMs(options, critical));
   if (!lock) {
-    process.stderr.write(
-      "Warning: timed out acquiring Codex state lock; continuing without cross-process locking.\n"
-    );
+    const message = "Timed out acquiring the Codex state lock";
+    if (critical) {
+      throw new Error(`${message}; refusing an unlocked state write.`);
+    }
+    process.stderr.write(`Warning: ${message}; skipped a non-critical progress update.\n`);
+    return null;
   }
 
   try {
@@ -194,6 +208,23 @@ function withStateLock(cwd, operation) {
   } finally {
     if (lock) {
       releaseStateLock(lock);
+    }
+  }
+}
+
+function renameWithRetry(source, destination) {
+  let retryIndex = 0;
+  while (true) {
+    try {
+      fs.renameSync(source, destination);
+      return;
+    } catch (error) {
+      const retryable = error?.code === "EPERM" || error?.code === "EBUSY";
+      if (!retryable || retryIndex >= ATOMIC_RENAME_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+      sleepSync(ATOMIC_RENAME_RETRY_DELAYS_MS[retryIndex]);
+      retryIndex += 1;
     }
   }
 }
@@ -207,7 +238,7 @@ function atomicWriteFile(filePath, contents) {
 
   try {
     fs.writeFileSync(temporaryFile, contents, "utf8");
-    fs.renameSync(temporaryFile, filePath);
+    renameWithRetry(temporaryFile, filePath);
   } finally {
     try {
       removeFileIfExists(temporaryFile);
@@ -243,16 +274,16 @@ function saveStateUnlocked(cwd, state) {
   return nextState;
 }
 
-export function saveState(cwd, state) {
-  return withStateLock(cwd, () => saveStateUnlocked(cwd, state));
+export function saveState(cwd, state, options = {}) {
+  return withStateLock(cwd, () => saveStateUnlocked(cwd, state), options);
 }
 
-export function updateState(cwd, mutate) {
+export function updateState(cwd, mutate, options = {}) {
   return withStateLock(cwd, () => {
     const state = loadState(cwd);
     mutate(state);
     return saveStateUnlocked(cwd, state);
-  });
+  }, options);
 }
 
 export function generateJobId(prefix = "job") {
@@ -260,7 +291,7 @@ export function generateJobId(prefix = "job") {
   return `${prefix}-${Date.now().toString(36)}-${random}`;
 }
 
-export function upsertJob(cwd, jobPatch) {
+export function upsertJob(cwd, jobPatch, options = {}) {
   return updateState(cwd, (state) => {
     const timestamp = nowIso();
     const existingIndex = state.jobs.findIndex((job) => job.id === jobPatch.id);
@@ -277,7 +308,7 @@ export function upsertJob(cwd, jobPatch) {
       ...jobPatch,
       updatedAt: timestamp
     };
-  });
+  }, options);
 }
 
 export function listJobs(cwd) {

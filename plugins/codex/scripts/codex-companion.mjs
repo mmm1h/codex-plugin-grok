@@ -64,6 +64,8 @@ import {
   createJobRecord,
   createProgressReporter,
   nowIso,
+  queueBackgroundJob,
+  readStoredJobWithRetry,
   runTrackedJob,
   SESSION_ID_ENV
 } from "./lib/tracked-jobs.mjs";
@@ -152,13 +154,13 @@ function normalizeReasoningEffort(effort) {
   return normalized;
 }
 
-function normalizeArgv(argv) {
+function normalizeArgv(argv, config = {}) {
   if (argv.length === 1) {
     const [raw] = argv;
     if (!raw || !raw.trim()) {
       return [];
     }
-    return splitRawArgumentString(raw);
+    return splitRawArgumentString(raw, config);
   }
   return argv;
 }
@@ -199,18 +201,26 @@ function extractArgsFileOptions(argv) {
 
 /**
  * @param {string[]} argv
- * @param {{ allowArgsFile?: boolean, booleanOptions?: string[], valueOptions?: string[], aliasMap?: Record<string, string> }} [config]
+ * @param {{ allowArgsFile?: boolean, preserveRawPositionals?: boolean, booleanOptions?: string[], valueOptions?: string[], aliasMap?: Record<string, string> }} [config]
  */
 function parseCommandInput(argv, config = {}) {
-  const { allowArgsFile = false, ...parseConfig } = config;
-  const normalizedArgv = normalizeArgv(argv);
+  const { allowArgsFile = false, preserveRawPositionals = false, ...parseConfig } = config;
   const finalConfig = {
     ...parseConfig,
+    stopAtFirstPositional: preserveRawPositionals,
     aliasMap: {
       C: "cwd",
       ...(parseConfig.aliasMap ?? {})
     }
   };
+  const rawConfig = {
+    ...finalConfig,
+    preserveRemainder: preserveRawPositionals,
+    valueOptions: allowArgsFile
+      ? [...(finalConfig.valueOptions ?? []), "args-file"]
+      : finalConfig.valueOptions
+  };
+  const normalizedArgv = normalizeArgv(argv, rawConfig);
 
   if (!allowArgsFile) {
     return parseArgs(normalizedArgv, finalConfig);
@@ -221,12 +231,17 @@ function parseCommandInput(argv, config = {}) {
     return parseArgs(remaining, finalConfig);
   }
 
+  const validatedArgsFiles = [];
   try {
     if (argsFiles.length > 1) {
       throw new Error("Provide only one --args-file.");
     }
 
-    const rawArguments = readValidatedArgsFile(argsFiles[0]);
+    const rawArguments = readValidatedArgsFile(argsFiles[0], process.env, {
+      onValidated(filePath) {
+        validatedArgsFiles.push(filePath);
+      }
+    });
     const directInput = parseArgs(remaining, finalConfig);
     if (directInput.positionals.length > 0) {
       throw new Error(
@@ -234,7 +249,10 @@ function parseCommandInput(argv, config = {}) {
       );
     }
 
-    const fileArguments = normalizeArgv([rawArguments]);
+    const fileArguments = normalizeArgv([rawArguments], {
+      ...finalConfig,
+      preserveRemainder: preserveRawPositionals
+    });
     const expandedArgv = [
       ...remaining.slice(0, insertionIndex),
       ...fileArguments,
@@ -242,12 +260,12 @@ function parseCommandInput(argv, config = {}) {
     ];
     return parseArgs(expandedArgv, finalConfig);
   } finally {
-    removeArgsFiles(argsFiles);
+    removeArgsFiles(validatedArgsFiles);
   }
 }
 
 function handleArgsPath(argv) {
-  const { options, positionals } = parseArgs(normalizeArgv(argv), {
+  const { options, positionals } = parseArgs(normalizeArgv(argv, { preserveRemainder: false }), {
     booleanOptions: ["json"]
   });
   if (positionals.length !== 1) {
@@ -356,7 +374,7 @@ function buildAdversarialReviewPrompt(context, focusText) {
   return interpolateTemplate(template, {
     REVIEW_KIND: "Adversarial Review",
     TARGET_LABEL: context.target.label,
-    USER_FOCUS: focusText || "No extra focus provided.",
+    USER_FOCUS: focusText.trim() ? focusText : "No extra focus provided.",
     REVIEW_COLLECTION_GUIDANCE: context.collectionGuidance,
     REVIEW_INPUT: context.content
   });
@@ -484,7 +502,7 @@ async function executeReviewRun(request) {
     base: request.base,
     scope: request.scope
   });
-  const focusText = request.focusText?.trim() ?? "";
+  const focusText = request.focusText ?? "";
   const reviewName = request.reviewName ?? "Review";
   if (reviewName === "Review") {
     const reviewTarget = validateNativeReviewRequest(target, focusText);
@@ -751,8 +769,12 @@ async function executeTransfer(cwd, options = {}) {
   const transfer = resolveSessionTransferSource(cwd, {
     source: options.source
   });
-  const result = await importExternalAgentSession(cwd, { sourcePath: transfer.importPath });
-  cleanupCodexImportStagingDir(path.dirname(transfer.importPath));
+  let result;
+  try {
+    result = await importExternalAgentSession(cwd, { sourcePath: transfer.importPath });
+  } finally {
+    cleanupCodexImportStagingDir(path.dirname(transfer.importPath));
+  }
   const sessionId =
     transfer.host === "grok"
       ? path.basename(path.dirname(transfer.sourcePath))
@@ -818,17 +840,11 @@ function enqueueBackgroundTask(cwd, job, request) {
   const { logFile } = createTrackedProgress(job);
   appendLogLine(logFile, "Queued for background execution.");
 
-  const child = spawnDetachedTaskWorker(cwd, job.id);
-  const queuedRecord = {
+  const queuedJob = {
     ...job,
-    status: "queued",
-    phase: "queued",
-    pid: child.pid ?? null,
-    logFile,
-    request
+    logFile
   };
-  writeJobFile(job.workspaceRoot, job.id, queuedRecord);
-  upsertJob(job.workspaceRoot, queuedRecord);
+  queueBackgroundJob(queuedJob, request, () => spawnDetachedTaskWorker(cwd, job.id));
 
   return {
     payload: {
@@ -847,6 +863,7 @@ async function handleReviewCommand(argv, config) {
   // so parseArgs does not leak them into review focus text.
   const { options, positionals } = parseCommandInput(argv, {
     allowArgsFile: true,
+    preserveRawPositionals: true,
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
@@ -856,7 +873,7 @@ async function handleReviewCommand(argv, config) {
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
-  const focusText = positionals.join(" ").trim();
+  const focusText = positionals.join(" ");
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     scope: options.scope
@@ -898,6 +915,7 @@ async function handleReview(argv) {
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     allowArgsFile: true,
+    preserveRawPositionals: true,
     valueOptions: ["model", "effort", "cwd", "prompt-file"],
     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background"],
     aliasMap: {
@@ -983,7 +1001,7 @@ async function handleTaskWorker(argv) {
   }
 
   const workspaceRoot = resolveCommandWorkspace(options);
-  const storedJob = readStoredJob(workspaceRoot, options["job-id"]);
+  const storedJob = await readStoredJobWithRetry(workspaceRoot, options["job-id"]);
   if (!storedJob) {
     throw new Error(`No stored job found for ${options["job-id"]}.`);
   }
@@ -1071,6 +1089,7 @@ function handleTaskResumeCandidate(argv) {
   });
 
   const workspaceRoot = resolveCommandWorkspace(options);
+  reconcileStaleJobs(workspaceRoot);
   const sessionId = getCurrentSessionId();
   const jobs = filterJobsForCurrentSession(sortJobsNewestFirst(listJobs(workspaceRoot)));
   const candidate = findLatestResumableTaskJob(jobs);
