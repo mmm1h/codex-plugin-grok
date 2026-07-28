@@ -214,10 +214,12 @@ node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the fai
 codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
 ```
 
-**Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Feed long prompts with a pipe:
+**Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Feed long prompts with a pipe. Prefer a **portable** output dir (e.g. `<repo>/tmp/codex-out/`), not a machine-local path like `D:\Cache\...`:
 
 ```powershell
-Get-Content -Raw D:\Cache\codex-out\spec.md | codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o D:\Cache\codex-out\out.md -
+$out = Join-Path <repo> "tmp/codex-out"
+New-Item -ItemType Directory -Force $out | Out-Null
+Get-Content -Raw (Join-Path $out "spec.md") | codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o (Join-Path $out "out.md") -
 ```
 
 ## Develop / test
