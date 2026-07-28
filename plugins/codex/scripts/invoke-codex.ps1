@@ -88,7 +88,8 @@ if ($PromptFile) {
 } else {
   $args += $Prompt
   Write-Host "invoke-codex: $CodexCmd $($args -join ' ')"
-  & $CodexCmd @args
+  # Close stdin so codex.ps1 / codex.cmd does not block on "Reading additional input from stdin..."
+  $null | & $CodexCmd @args
 }
 
 $code = $LASTEXITCODE
