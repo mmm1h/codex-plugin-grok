@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import {
+  createArgsPath,
+  readValidatedArgsFile,
+  removeArgsFiles
+} from "./lib/args-file.mjs";
+import {
     buildPersistentTaskThreadName,
     DEFAULT_CONTINUE_PROMPT,
     findLatestTaskThread,
@@ -94,15 +99,16 @@ function printUsage() {
   console.log(
     [
       "Usage:",
-      "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]  (host controls accepted; direct CLI stays foreground)",
-      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]  (host controls accepted; direct CLI stays foreground)",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [prompt]",
-      "  node scripts/codex-companion.mjs transfer [--source <session-jsonl>] [--json]",
+      "  node scripts/codex-companion.mjs args-path <command-name> [--json]",
+      "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json] [--args-file <path>]",
+      "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--args-file <path>]  (host controls accepted; direct CLI stays foreground)",
+      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text] [--args-file <path>]  (host controls accepted; direct CLI stays foreground)",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [prompt] [--args-file <path>]",
+      "  node scripts/codex-companion.mjs transfer [--source <session-jsonl>] [--json] [--args-file <path>]",
       "  node scripts/codex-companion.mjs task-resume-candidate [--json]",
-      "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
-      "  node scripts/codex-companion.mjs result [job-id] [--json]",
-      "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
+      "  node scripts/codex-companion.mjs status [job-id] [--all] [--json] [--args-file <path>]",
+      "  node scripts/codex-companion.mjs result [job-id] [--json] [--args-file <path>]",
+      "  node scripts/codex-companion.mjs cancel [job-id] [--json] [--args-file <path>]"
     ].join("\n")
   );
 }
@@ -157,14 +163,95 @@ function normalizeArgv(argv) {
   return argv;
 }
 
+function extractArgsFileOptions(argv) {
+  const argsFiles = [];
+  const remaining = [];
+  let insertionIndex = null;
+  let passthrough = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (passthrough || token === "--") {
+      remaining.push(token);
+      passthrough = true;
+      continue;
+    }
+    if (token === "--args-file") {
+      const filePath = argv[index + 1];
+      if (filePath === undefined) {
+        throw new Error("Missing value for --args-file");
+      }
+      insertionIndex ??= remaining.length;
+      argsFiles.push(filePath);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--args-file=")) {
+      insertionIndex ??= remaining.length;
+      argsFiles.push(token.slice("--args-file=".length));
+      continue;
+    }
+    remaining.push(token);
+  }
+
+  return { argsFiles, insertionIndex, remaining };
+}
+
 function parseCommandInput(argv, config = {}) {
-  return parseArgs(normalizeArgv(argv), {
-    ...config,
+  const { allowArgsFile = false, ...parseConfig } = config;
+  const normalizedArgv = normalizeArgv(argv);
+  const finalConfig = {
+    ...parseConfig,
     aliasMap: {
       C: "cwd",
-      ...(config.aliasMap ?? {})
+      ...(parseConfig.aliasMap ?? {})
     }
+  };
+
+  if (!allowArgsFile) {
+    return parseArgs(normalizedArgv, finalConfig);
+  }
+
+  const { argsFiles, insertionIndex, remaining } = extractArgsFileOptions(normalizedArgv);
+  if (argsFiles.length === 0) {
+    return parseArgs(remaining, finalConfig);
+  }
+
+  try {
+    if (argsFiles.length > 1) {
+      throw new Error("Provide only one --args-file.");
+    }
+
+    const rawArguments = readValidatedArgsFile(argsFiles[0]);
+    const directInput = parseArgs(remaining, finalConfig);
+    if (directInput.positionals.length > 0) {
+      throw new Error(
+        "`--args-file` cannot be combined with positional arguments; put the complete raw argument string in the args file."
+      );
+    }
+
+    const fileArguments = normalizeArgv([rawArguments]);
+    const expandedArgv = [
+      ...remaining.slice(0, insertionIndex),
+      ...fileArguments,
+      ...remaining.slice(insertionIndex)
+    ];
+    return parseArgs(expandedArgv, finalConfig);
+  } finally {
+    removeArgsFiles(argsFiles);
+  }
+}
+
+function handleArgsPath(argv) {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
+    booleanOptions: ["json"]
   });
+  if (positionals.length !== 1) {
+    throw new Error("Usage: args-path <command-name> [--json]");
+  }
+
+  const argsPath = createArgsPath(positionals[0]);
+  outputResult(options.json ? { path: argsPath } : `${argsPath}\n`, options.json);
 }
 
 function resolveCommandCwd(options = {}) {
@@ -235,6 +322,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["cwd"],
     booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
   });
@@ -754,6 +842,7 @@ async function handleReviewCommand(argv, config) {
   // Host command templates own waiting/background execution; keep both flags declared
   // so parseArgs does not leak them into review focus text.
   const { options, positionals } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
@@ -804,6 +893,7 @@ async function handleReview(argv) {
 
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["model", "effort", "cwd", "prompt-file"],
     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background"],
     aliasMap: {
@@ -867,6 +957,7 @@ async function handleTask(argv) {
 
 async function handleTransfer(argv) {
   const { options } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["cwd", "source"],
     booleanOptions: ["json"]
   });
@@ -925,6 +1016,7 @@ async function handleTaskWorker(argv) {
 
 async function handleStatus(argv) {
   const { options, positionals } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"],
     booleanOptions: ["json", "all", "wait"]
   });
@@ -952,6 +1044,7 @@ async function handleStatus(argv) {
 
 function handleResult(argv) {
   const { options, positionals } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
@@ -1005,6 +1098,7 @@ function handleTaskResumeCandidate(argv) {
 
 async function handleCancel(argv) {
   const { options, positionals } = parseCommandInput(argv, {
+    allowArgsFile: true,
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
@@ -1072,6 +1166,9 @@ async function main() {
   }
 
   switch (subcommand) {
+    case "args-path":
+      handleArgsPath(argv);
+      break;
     case "setup":
       await handleSetup(argv);
       break;
