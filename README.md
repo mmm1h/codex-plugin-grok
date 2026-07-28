@@ -210,8 +210,14 @@ Grok can also call the companion script or `codex exec` directly:
 
 ```bash
 node "${GROK_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write "fix the failing test"
-# or
+# short prompt as args:
 codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o out.md "<task>"
+```
+
+**Windows PowerShell note:** do **not** use bash stdin redirection (`codex exec ... - < spec.md`) — pwsh rejects `<`. Feed long prompts with a pipe:
+
+```powershell
+Get-Content -Raw D:\Cache\codex-out\spec.md | codex exec --profile codex-api -c model_reasoning_effort="medium" -C <repo> -o D:\Cache\codex-out\out.md -
 ```
 
 ## Develop / test
