@@ -170,6 +170,10 @@ function Invoke-CodexProcess {
   $psi.RedirectStandardOutput = $false
   $psi.RedirectStandardError = $false
   $psi.CreateNoWindow = $true
+  # Codex validates stdin as UTF-8; default Windows encoding would corrupt non-ASCII prompts.
+  if ($UseStdin) {
+    $psi.StandardInputEncoding = [System.Text.UTF8Encoding]::new($false)
+  }
   if ($WorkingDirectory) {
     $psi.WorkingDirectory = $WorkingDirectory
   }
@@ -187,6 +191,7 @@ function Invoke-CodexProcess {
   if ($UseStdin) {
     try {
       if ($null -ne $StdinText -and $StdinText.Length -gt 0) {
+        # Write Unicode string through UTF-8 stdin encoding set above.
         $proc.StandardInput.Write($StdinText)
         if (-not $StdinText.EndsWith("`n")) {
           $proc.StandardInput.WriteLine()
@@ -235,7 +240,7 @@ $stdinText = $null
 if ($PromptFile) {
   $promptPath = (Resolve-Path -LiteralPath $PromptFile).Path
   [void]$codexArgs.Add("-")
-  $stdinText = Get-Content -Raw -LiteralPath $promptPath
+  $stdinText = [System.IO.File]::ReadAllText($promptPath, [System.Text.UTF8Encoding]::new($false))
   $useStdin = $true
   $argPreview = ($codexArgs | Select-Object -Skip $launch.PrefixArgs.Count) -join " "
   Write-Host "invoke-codex: process-stdin $promptPath -> $($launch.Display) $argPreview"
