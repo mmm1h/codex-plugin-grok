@@ -306,7 +306,10 @@ test("Windows invoke-codex helper ships and avoids bash stdin redirection", () =
   const helper = path.join(PLUGIN_ROOT, "scripts", "invoke-codex.ps1");
   assert.equal(fs.existsSync(helper), true);
   const source = fs.readFileSync(helper, "utf8");
-  assert.match(source, /Get-Content\s+-Raw/);
+  assert.match(
+    source,
+    /\[System\.IO\.File\]::ReadAllText\(\$promptPath,\s*\[System\.Text\.UTF8Encoding\]::new\(\$false\)\)/
+  );
   assert.match(source, /tmp\/codex-out|tmp\\codex-out|Join-Path.*tmp/);
   assert.doesNotMatch(source, /codex exec[^\n]*<\s/);
   assert.match(source, /PromptFile/);
@@ -367,7 +370,7 @@ test("Windows invoke-codex helper only applies explicit overrides and preserves 
       ],
       {
         cwd: repo,
-        env: { ...process.env, CODEX_TEST_ARGS: argsFile, ...env },
+        env: { ...process.env, APPDATA: repo, CODEX_TEST_ARGS: argsFile, ...env },
         encoding: "utf8",
         windowsHide: true
       }

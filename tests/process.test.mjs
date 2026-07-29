@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { makeTempDir } from "./helpers.mjs";
 import { readStdinIfPiped, readStdinJson } from "../plugins/codex/scripts/lib/fs.mjs";
@@ -51,7 +52,7 @@ test("isProcessAlive returns true for EPERM", () => {
   );
 });
 
-test("readStdinIfPiped skips stdin that is neither a FIFO nor a file", () => {
+test("readStdinIfPiped skips unsupported stdin descriptors", () => {
   const originalFstatSync = fs.fstatSync;
   const originalReadFileSync = fs.readFileSync;
   let probed = false;
@@ -62,7 +63,8 @@ test("readStdinIfPiped skips stdin that is neither a FIFO nor a file", () => {
       probed = true;
       return {
         isFIFO: () => false,
-        isFile: () => false
+        isFile: () => false,
+        isSocket: () => false
       };
     };
     fs.readFileSync = () => {
@@ -77,6 +79,42 @@ test("readStdinIfPiped skips stdin that is neither a FIFO nor a file", () => {
     fs.fstatSync = originalFstatSync;
     fs.readFileSync = originalReadFileSync;
   }
+});
+
+test("readStdinIfPiped reads socket-backed stdin", () => {
+  const originalFstatSync = fs.fstatSync;
+  const originalReadFileSync = fs.readFileSync;
+
+  try {
+    fs.fstatSync = () => ({
+      isFIFO: () => false,
+      isFile: () => false,
+      isSocket: () => true
+    });
+    fs.readFileSync = () => '{"sessionId":"socket-session"}';
+
+    assert.equal(readStdinIfPiped(), '{"sessionId":"socket-session"}');
+  } finally {
+    fs.fstatSync = originalFstatSync;
+    fs.readFileSync = originalReadFileSync;
+  }
+});
+
+test("readStdinJson reads JSON supplied through spawnSync input", () => {
+  const moduleUrl = new URL("../plugins/codex/scripts/lib/fs.mjs", import.meta.url).href;
+  const source = [
+    `import { readStdinJson } from ${JSON.stringify(moduleUrl)};`,
+    "process.stdout.write(JSON.stringify(readStdinJson()));"
+  ].join("\n");
+  const input = { sessionId: "spawn-input-session", hookEventName: "session_start" };
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
+    input: JSON.stringify(input),
+    encoding: "utf8",
+    windowsHide: true
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), input);
 });
 
 test("readStdinJson returns an empty object for empty or invalid JSON", () => {

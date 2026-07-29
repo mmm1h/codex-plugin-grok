@@ -42,7 +42,8 @@ export function readStdinIfPiped() {
     const isWindowsPipe =
       process.platform === "win32" &&
       (stdinStat.mode & fs.constants.S_IFMT) === fs.constants.S_IFIFO;
-    if (!stdinStat.isFIFO() && !isWindowsPipe && !stdinStat.isFile()) {
+    const isSocket = stdinStat.isSocket?.() ?? false;
+    if (!stdinStat.isFIFO() && !isWindowsPipe && !stdinStat.isFile() && !isSocket) {
       return "";
     }
     return fs.readFileSync(0, "utf8");
